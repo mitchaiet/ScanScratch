@@ -4,13 +4,13 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
     QHBoxLayout,
+    QVBoxLayout,
     QSplitter,
     QFileDialog,
     QMessageBox,
     QLabel,
     QStatusBar,
-    QToolBar,
-    QSizePolicy,
+    QPushButton,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize
 from PyQt6.QtGui import QAction, QKeySequence, QGuiApplication, QIcon
@@ -168,16 +168,26 @@ class MainWindow(QMainWindow):
         self._crop_box = None  # For removing letterbox/pillarbox
         self._showing_clean = False  # A/B toggle state
 
-        # Create central widget
+        # Create central widget with vertical layout
         central = QWidget()
         self.setCentralWidget(central)
 
-        # Main layout
-        layout = QHBoxLayout(central)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(0)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # Create splitter for three panes
+        # Create menu bar first
+        self._create_menu_bar()
+
+        # Create unified top bar
+        self._create_unified_header()
+        main_layout.addWidget(self.header_widget)
+
+        # Create content area with three panes
+        content_layout = QHBoxLayout()
+        content_layout.setContentsMargins(8, 8, 8, 8)
+        content_layout.setSpacing(0)
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(8)
 
@@ -197,13 +207,8 @@ class MainWindow(QMainWindow):
         # Set initial sizes (left: 35%, middle: 30%, right: 35%)
         splitter.setSizes([400, 350, 400])
 
-        layout.addWidget(splitter)
-
-        # Create menu bar
-        self._create_menu_bar()
-
-        # Create toolbar
-        self._create_toolbar()
+        content_layout.addWidget(splitter)
+        main_layout.addLayout(content_layout)
 
         # Create status bar
         self._create_status_bar()
@@ -287,62 +292,63 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
-    def _create_toolbar(self):
-        """Create main toolbar with common actions."""
-        toolbar = QToolBar("Main Toolbar")
-        toolbar.setMovable(False)
-        toolbar.setIconSize(QSize(24, 24))
-        self.addToolBar(toolbar)
+    def _create_unified_header(self):
+        """Create unified header bar with logo and controls."""
+        from PyQt6.QtGui import QFont
+        from PyQt6.QtWidgets import QFrame
 
-        # Open Image
-        self.open_toolbar_action = QAction("📁 Open", self)
-        self.open_toolbar_action.setToolTip("Open Image (Ctrl+O)")
-        self.open_toolbar_action.triggered.connect(self._on_open_file)
-        toolbar.addAction(self.open_toolbar_action)
+        self.header_widget = QFrame()
+        self.header_widget.setObjectName("unifiedHeader")
+        header_layout = QHBoxLayout(self.header_widget)
+        header_layout.setContentsMargins(12, 6, 12, 6)
+        header_layout.setSpacing(12)
 
-        toolbar.addSeparator()
+        # Logo section - compact
+        logo_label = QLabel("▓▒░ SCANSCRATCH")
+        logo_font = QFont()
+        logo_font.setPixelSize(13)
+        logo_font.setBold(True)
+        logo_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1)
+        logo_label.setFont(logo_font)
+        logo_label.setObjectName("headerLogo")
+        header_layout.addWidget(logo_label)
 
-        # Transmit button (starts disabled)
-        self.transmit_toolbar_action = QAction("⚡ TRANSMIT", self)
-        self.transmit_toolbar_action.setToolTip("Encode, corrupt, and decode image")
-        self.transmit_toolbar_action.setEnabled(False)
-        self.transmit_toolbar_action.triggered.connect(self._on_transmit)
-        toolbar.addAction(self.transmit_toolbar_action)
+        # Spacer
+        header_layout.addStretch()
 
-        toolbar.addSeparator()
+        # Action buttons - compact, no emoji
+        self.open_btn = QPushButton("Open")
+        self.open_btn.setObjectName("headerButton")
+        self.open_btn.setToolTip("Open Image (Ctrl+O)")
+        self.open_btn.clicked.connect(self._on_open_file)
+        header_layout.addWidget(self.open_btn)
 
-        # Export
-        self.export_toolbar_action = QAction("💾 Export", self)
-        self.export_toolbar_action.setToolTip("Export Output (Ctrl+E)")
-        self.export_toolbar_action.setEnabled(False)
-        self.export_toolbar_action.triggered.connect(self._on_export)
-        toolbar.addAction(self.export_toolbar_action)
+        self.transmit_btn = QPushButton("TRANSMIT")
+        self.transmit_btn.setObjectName("headerTransmitButton")
+        self.transmit_btn.setToolTip("Encode, corrupt, and decode image")
+        self.transmit_btn.setEnabled(False)
+        self.transmit_btn.clicked.connect(self._on_transmit)
+        header_layout.addWidget(self.transmit_btn)
 
-        # Copy
-        self.copy_toolbar_action = QAction("📋 Copy", self)
-        self.copy_toolbar_action.setToolTip("Copy Output to Clipboard (Ctrl+C)")
-        self.copy_toolbar_action.setEnabled(False)
-        self.copy_toolbar_action.triggered.connect(self._on_copy_output)
-        toolbar.addAction(self.copy_toolbar_action)
+        self.export_btn = QPushButton("Export")
+        self.export_btn.setObjectName("headerButton")
+        self.export_btn.setToolTip("Export Output (Ctrl+E)")
+        self.export_btn.setEnabled(False)
+        self.export_btn.clicked.connect(self._on_export)
+        header_layout.addWidget(self.export_btn)
 
-        toolbar.addSeparator()
+        self.copy_btn = QPushButton("Copy")
+        self.copy_btn.setObjectName("headerButton")
+        self.copy_btn.setToolTip("Copy to Clipboard (Ctrl+C)")
+        self.copy_btn.setEnabled(False)
+        self.copy_btn.clicked.connect(self._on_copy_output)
+        header_layout.addWidget(self.copy_btn)
 
-        # Reset Effects
-        reset_toolbar_action = QAction("🔄 Reset", self)
-        reset_toolbar_action.setToolTip("Reset All Effects (Ctrl+R)")
-        reset_toolbar_action.triggered.connect(self._on_reset_effects)
-        toolbar.addAction(reset_toolbar_action)
-
-        # Add stretch to push remaining items to the right
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        toolbar.addWidget(spacer)
-
-        # Help
-        help_toolbar_action = QAction("❓ Help", self)
-        help_toolbar_action.setToolTip("Keyboard Shortcuts (Ctrl+/)")
-        help_toolbar_action.triggered.connect(self._show_shortcuts)
-        toolbar.addAction(help_toolbar_action)
+        reset_btn = QPushButton("Reset")
+        reset_btn.setObjectName("headerButton")
+        reset_btn.setToolTip("Reset All Effects (Ctrl+R)")
+        reset_btn.clicked.connect(self._on_reset_effects)
+        header_layout.addWidget(reset_btn)
 
     def _create_status_bar(self):
         """Create status bar with image info."""
@@ -359,6 +365,7 @@ class MainWindow(QMainWindow):
         """Connect widget signals."""
         self.source_viewer.image_loaded.connect(self._on_source_loaded)
         self.params_panel.transmit_requested.connect(self._on_transmit)
+        self.output_viewer.export_requested.connect(self._on_export_version)
 
     def _on_open_file(self):
         """Open file dialog to load an image."""
@@ -370,6 +377,34 @@ class MainWindow(QMainWindow):
         )
         if file_path:
             self.source_viewer.load_image(file_path)
+
+    def _on_export_version(self, version: str):
+        """Export a specific version (affected or clean)."""
+        image_data = self._clean_image_data if version == "clean" else self._output_image_data
+
+        if image_data is None:
+            QMessageBox.warning(self, "No Output", f"No {version} output image available.")
+            return
+
+        # Convert to PIL Image
+        img = Image.fromarray(image_data, mode='RGB')
+
+        # Apply crop if available
+        if self._crop_box is not None:
+            left, top, right, bottom = self._crop_box
+            left = max(0, left)
+            top = max(0, top)
+            right = min(img.width, right)
+            bottom = min(img.height, bottom)
+
+            # Only crop if valid
+            if right > left and bottom > top:
+                img = img.crop((left, top, right, bottom))
+
+        # Open export dialog
+        from .export_dialog import ExportDialog
+        dialog = ExportDialog(img, self)
+        dialog.exec()
 
     def _on_export(self):
         """Export the output image (currently displayed version)."""
@@ -509,7 +544,7 @@ to create unique visual artifacts.</p>
     def _on_source_loaded(self):
         """Handle source image loaded."""
         self.params_panel.set_transmit_enabled(True)
-        self.transmit_toolbar_action.setEnabled(True)
+        self.transmit_btn.setEnabled(True)
         self._update_status_bar()
         self.status_label.setText("Image loaded - ready to transmit")
 
@@ -618,12 +653,12 @@ to create unique visual artifacts.</p>
     def _on_transmission_finished(self):
         """Handle transmission complete."""
         self.params_panel.set_transmit_enabled(True)
-        self.transmit_toolbar_action.setEnabled(True)
+        self.transmit_btn.setEnabled(True)
         self.params_panel.stop_audio_visualization()
         self.export_action.setEnabled(True)
-        self.export_toolbar_action.setEnabled(True)
+        self.export_btn.setEnabled(True)
         self.copy_action.setEnabled(True)
-        self.copy_toolbar_action.setEnabled(True)
+        self.copy_btn.setEnabled(True)
         self.output_viewer.enable_ab_toggle(True)
         # Status message already set by worker ("Transmission complete!")
         # Add A/B toggle hint

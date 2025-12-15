@@ -89,12 +89,36 @@ QPushButton#transmitButton:disabled {
     color: #555;
 }
 
+QPushButton#exportButton {
+    background-color: #3a3a3a;
+    border: 1px solid #4a4a4a;
+    border-radius: 3px;
+    padding: 4px 10px;
+    color: #e0e0e0;
+    font-weight: 500;
+    font-size: 10px;
+}
+
+QPushButton#exportButton:hover {
+    background-color: #4a4a4a;
+}
+
+QPushButton#exportButton:pressed {
+    background-color: #2a2a2a;
+}
+
+QPushButton#exportButton:disabled {
+    background-color: #2a2a2a;
+    color: #555;
+    border-color: #333;
+}
+
 QPushButton#abToggle {
     background-color: #3a4a5a;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
-    padding: 6px 12px;
-    border-radius: 4px;
+    padding: 4px 10px;
+    border-radius: 3px;
 }
 
 QPushButton#abToggle:hover {
@@ -253,27 +277,73 @@ QProgressBar::chunk {
     border-radius: 4px;
 }
 
-QFrame#logoFrame {
+QFrame#unifiedHeader {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                                 stop:0 #2a2a2a, stop:0.5 #353535, stop:1 #2a2a2a);
     border: none;
     border-bottom: 2px solid #4a7a4a;
-    border-radius: 0px;
-    padding: 12px;
+    padding: 0px;
 }
 
-QLabel#logoLabel {
+QLabel#headerLogo {
     color: #6a9a6a;
     font-weight: bold;
-    letter-spacing: 3px;
-    padding: 2px;
-}
-
-QLabel#tagline {
-    color: #777;
-    font-size: 9px;
-    font-weight: 600;
     letter-spacing: 2px;
     padding: 0px;
+}
+
+QLabel#headerTagline {
+    color: #777;
+    font-weight: 600;
+    letter-spacing: 1px;
+    padding: 0px;
+}
+
+QPushButton#headerButton {
+    background-color: #3a3a3a;
+    border: none;
+    border-radius: 3px;
+    padding: 4px 10px;
+    color: #e0e0e0;
+    font-weight: 500;
+    font-size: 11px;
+    min-width: 50px;
+}
+
+QPushButton#headerButton:hover {
+    background-color: #4a4a4a;
+}
+
+QPushButton#headerButton:pressed {
+    background-color: #2a2a2a;
+}
+
+QPushButton#headerButton:disabled {
+    background-color: #2a2a2a;
+    color: #555;
+}
+
+QPushButton#headerTransmitButton {
+    background-color: #3a6a3a;
+    border: none;
+    border-radius: 3px;
+    padding: 4px 12px;
+    color: #ffffff;
+    font-weight: bold;
+    font-size: 11px;
+    min-width: 70px;
+}
+
+QPushButton#headerTransmitButton:hover {
+    background-color: #4a7a4a;
+}
+
+QPushButton#headerTransmitButton:pressed {
+    background-color: #2a5a2a;
+}
+
+QPushButton#headerTransmitButton:disabled {
+    background-color: #2a2a2a;
+    color: #555;
 }
 """

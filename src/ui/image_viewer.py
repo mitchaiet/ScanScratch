@@ -20,6 +20,7 @@ class ImageViewer(QWidget):
 
     image_loaded = pyqtSignal()
     ab_toggled = pyqtSignal(bool)  # True = showing clean, False = showing affected
+    export_requested = pyqtSignal(str)  # "affected" or "clean"
 
     def __init__(self, title: str = "IMAGE", accept_drops: bool = False, show_ab_toggle: bool = False):
         super().__init__()
@@ -51,10 +52,25 @@ class ImageViewer(QWidget):
         if self._show_ab_toggle:
             title_row.addStretch()
 
+            # Export buttons
+            self.export_affected_btn = QPushButton("Export A")
+            self.export_affected_btn.setObjectName("exportButton")
+            self.export_affected_btn.setEnabled(False)
+            self.export_affected_btn.clicked.connect(lambda: self.export_requested.emit("affected"))
+            self.export_affected_btn.setToolTip("Export version with effects")
+            title_row.addWidget(self.export_affected_btn)
+
+            self.export_clean_btn = QPushButton("Export B")
+            self.export_clean_btn.setObjectName("exportButton")
+            self.export_clean_btn.setEnabled(False)
+            self.export_clean_btn.clicked.connect(lambda: self.export_requested.emit("clean"))
+            self.export_clean_btn.setToolTip("Export clean version")
+            title_row.addWidget(self.export_clean_btn)
+
             # A/B toggle button
             self.ab_button = QPushButton("A (WITH EFFECTS)")
             self.ab_button.setObjectName("abToggle")
-            self.ab_button.setFixedWidth(180)
+            self.ab_button.setFixedWidth(150)
             self.ab_button.setEnabled(False)
             self.ab_button.clicked.connect(self._on_ab_clicked)
             self.ab_button.setToolTip("Toggle between clean and affected transmission")
@@ -168,9 +184,11 @@ class ImageViewer(QWidget):
         self.ab_toggled.emit(self._is_clean)
 
     def enable_ab_toggle(self, enabled: bool):
-        """Enable or disable the A/B toggle button."""
+        """Enable or disable the A/B toggle button and export buttons."""
         if self._show_ab_toggle:
             self.ab_button.setEnabled(enabled)
+            self.export_affected_btn.setEnabled(enabled)
+            self.export_clean_btn.setEnabled(enabled)
 
     def fit_to_window(self):
         """Trigger image to fit to current window size."""
