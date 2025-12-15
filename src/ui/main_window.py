@@ -131,7 +131,7 @@ class StreamingTransmissionWorker(QThread):
                     line_count += 1
 
                     if line_count % 10 == 0:
-                        print(f"  Line {line_count}/256 decoded...", flush=True)
+                        print(f"  Line {line_count}/{decoder_affected.height} decoded...", flush=True)
 
                     if self._stop_requested:
                         print("Stop requested, breaking...", flush=True)
