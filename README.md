@@ -76,6 +76,37 @@ A professional PyQt6 application for creating glitch art through SSTV (Slow Scan
 
 ## Installation
 
+### Option 1: Download Mac App (Easiest)
+
+1. Download **ScanScratch.dmg** from the [latest release](https://github.com/mitchaiet/ScanScratch/releases/latest)
+2. Open the DMG file
+3. Drag ScanScratch.app to your Applications folder
+4. **Important**: See troubleshooting below for first launch
+
+#### ⚠️ Troubleshooting "Cannot Verify" Warning
+
+Since this app is not code-signed, macOS will block it by default. **Choose one method:**
+
+**Method 1 - Terminal (Recommended):**
+```bash
+xattr -cr /Applications/ScanScratch.app
+```
+Then double-click to open normally.
+
+**Method 2 - Right-Click:**
+1. Right-click ScanScratch.app → Open
+2. Click "Open" in the security dialog
+
+**Method 3 - System Settings:**
+1. Try to open ScanScratch normally
+2. Go to System Settings → Privacy & Security
+3. Click "Open Anyway" next to the ScanScratch message
+4. Click "Open" again
+
+**Why this happens:** Code signing requires an Apple Developer account ($99/year). The app is safe - you can review all source code in this repository.
+
+### Option 2: Run from Source
+
 ```bash
 # Clone the repository
 git clone https://github.com/mitchaiet/ScanScratch.git
