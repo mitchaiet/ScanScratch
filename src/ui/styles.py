@@ -302,12 +302,12 @@ QLabel#headerTagline {
 QPushButton#headerButton {
     background-color: #3a3a3a;
     border: none;
-    border-radius: 3px;
-    padding: 4px 10px;
+    border-radius: 2px;
+    padding: 2px 8px;
     color: #e0e0e0;
     font-weight: 500;
-    font-size: 11px;
-    min-width: 50px;
+    font-size: 10px;
+    min-width: 40px;
 }
 
 QPushButton#headerButton:hover {
@@ -326,12 +326,12 @@ QPushButton#headerButton:disabled {
 QPushButton#headerTransmitButton {
     background-color: #3a6a3a;
     border: none;
-    border-radius: 3px;
-    padding: 4px 12px;
+    border-radius: 2px;
+    padding: 2px 10px;
     color: #ffffff;
     font-weight: bold;
-    font-size: 11px;
-    min-width: 70px;
+    font-size: 10px;
+    min-width: 60px;
 }
 
 QPushButton#headerTransmitButton:hover {
