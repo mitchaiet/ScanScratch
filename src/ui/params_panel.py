@@ -395,6 +395,9 @@ class ParamsPanel(QWidget):
             "Scottie S2",
             "Robot 36",
             "PD 90",
+            "PD 120",
+            "PD 180",
+            "PD 290",
         ])
         sstv_layout.addWidget(self.mode_combo)
         scroll_layout.addWidget(sstv_group)
@@ -737,6 +740,9 @@ class ParamsPanel(QWidget):
             "Scottie S2": "ScottieS2",
             "Robot 36": "Robot36",
             "PD 90": "PD90",
+            "PD 120": "PD120",
+            "PD 180": "PD180",
+            "PD 290": "PD290",
         }
 
         return {

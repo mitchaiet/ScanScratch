@@ -67,6 +67,30 @@ MODE_SPECS = {
         "gap_ms": 2.08,
         "color_order": "RGB",
     },
+    "PD120": {
+        "width": 640,
+        "height": 496,
+        "sync_ms": 20.0,
+        "scan_ms": 121.6,
+        "gap_ms": 2.08,
+        "color_order": "RGB",
+    },
+    "PD180": {
+        "width": 640,
+        "height": 496,
+        "sync_ms": 20.0,
+        "scan_ms": 183.04,
+        "gap_ms": 2.08,
+        "color_order": "RGB",
+    },
+    "PD290": {
+        "width": 800,
+        "height": 616,
+        "sync_ms": 20.0,
+        "scan_ms": 228.8,
+        "gap_ms": 2.08,
+        "color_order": "RGB",
+    },
 }
 
 

@@ -14,6 +14,9 @@ from pysstv.color import (
     ScottieS2,
     Robot36,
     PD90,
+    PD120,
+    PD180,
+    PD290,
 )
 
 
@@ -25,6 +28,9 @@ MODE_SPECS = {
     "ScottieS2": {"class": ScottieS2, "width": 160, "height": 256}, # S2 is half width
     "Robot36": {"class": Robot36, "width": 320, "height": 240},
     "PD90": {"class": PD90, "width": 320, "height": 256},
+    "PD120": {"class": PD120, "width": 640, "height": 496},
+    "PD180": {"class": PD180, "width": 640, "height": 496},
+    "PD290": {"class": PD290, "width": 800, "height": 616},
 }
 
 
