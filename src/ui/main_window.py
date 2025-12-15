@@ -303,12 +303,11 @@ class MainWindow(QMainWindow):
         header_layout.setContentsMargins(8, 3, 8, 3)
         header_layout.setSpacing(8)
 
-        # Logo section - very compact
-        logo_label = QLabel("▓▒░ SCANSCRATCH")
+        # Logo section - minimal
+        logo_label = QLabel("SCANSCRATCH")
         logo_font = QFont()
-        logo_font.setPixelSize(11)
+        logo_font.setPixelSize(10)
         logo_font.setBold(True)
-        logo_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.5)
         logo_label.setFont(logo_font)
         logo_label.setObjectName("headerLogo")
         header_layout.addWidget(logo_label)
