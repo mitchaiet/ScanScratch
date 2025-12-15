@@ -36,21 +36,20 @@ MODE_SPECS = {
 }
 
 
-def encode_custom_mode(image: Image.Image, mode: str, sample_rate: int, spec: dict = None) -> np.ndarray:
+def encode_custom_mode(image: Image.Image, mode: str, sample_rate: int, spec: dict) -> np.ndarray:
     """
     Custom SSTV encoder for experimental high-resolution modes.
     Generates SSTV audio directly without using pysstv.
+
+    Args:
+        image: PIL Image to encode
+        mode: SSTV mode name
+        sample_rate: Audio sample rate
+        spec: Complete mode spec with width, height, sync_ms, scan_ms, gap_ms, color_order
     """
-    from .streaming_decoder import MODE_SPECS as DECODER_SPECS
-
-    if spec is None:
-        if mode not in DECODER_SPECS:
-            raise ValueError(f"Unknown custom mode: {mode}")
-        spec = DECODER_SPECS[mode]
-
-    # Get dimensions from spec or image
-    width = spec.get("width") or image.size[0]
-    height = spec.get("height") or image.size[1]
+    # Get dimensions from spec
+    width = spec["width"]
+    height = spec["height"]
 
     # SSTV frequency constants
     FREQ_SYNC = 1200
@@ -196,8 +195,14 @@ class SSTVEncoder:
         if mode not in MODE_SPECS:
             raise ValueError(f"Unknown SSTV mode: {mode}")
 
-        spec = MODE_SPECS[mode].copy()
-        sstv_class = spec["class"]
+        # For NativeRes, use decoder's spec as base (has timing info)
+        if mode == "NativeRes":
+            from .streaming_decoder import MODE_SPECS as DECODER_SPECS
+            spec = DECODER_SPECS[mode].copy()
+            sstv_class = None  # NativeRes uses custom encoder
+        else:
+            spec = MODE_SPECS[mode].copy()
+            sstv_class = spec["class"]
 
         # Ensure RGB mode
         if image.mode != "RGB":
