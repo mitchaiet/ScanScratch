@@ -23,7 +23,10 @@ pyinstaller --name "ScanScratch" \
     --osx-bundle-identifier "com.scanscratch.app" \
     --hidden-import sounddevice \
     --hidden-import soundfile \
-    --hidden-import scipy.special.cython_special \
+    --collect-submodules scipy.signal \
+    --collect-submodules scipy.stats \
+    --collect-submodules scipy.special \
+    --copy-metadata scipy \
     --collect-all pysstv \
     --exclude-module IPython \
     --exclude-module matplotlib \
