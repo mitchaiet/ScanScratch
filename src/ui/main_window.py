@@ -299,14 +299,15 @@ class MainWindow(QMainWindow):
 
         self.header_widget = QFrame()
         self.header_widget.setObjectName("unifiedHeader")
+        self.header_widget.setMaximumHeight(24)
         header_layout = QHBoxLayout(self.header_widget)
-        header_layout.setContentsMargins(8, 3, 8, 3)
-        header_layout.setSpacing(8)
+        header_layout.setContentsMargins(8, 1, 8, 1)
+        header_layout.setSpacing(6)
 
         # Logo section - minimal
         logo_label = QLabel("SCANSCRATCH")
         logo_font = QFont()
-        logo_font.setPixelSize(10)
+        logo_font.setPixelSize(9)
         logo_font.setBold(True)
         logo_label.setFont(logo_font)
         logo_label.setObjectName("headerLogo")

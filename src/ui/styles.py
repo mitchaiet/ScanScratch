@@ -281,8 +281,9 @@ QFrame#unifiedHeader {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                                 stop:0 #2a2a2a, stop:0.5 #353535, stop:1 #2a2a2a);
     border: none;
-    border-bottom: 2px solid #4a7a4a;
+    border-bottom: 1px solid #4a7a4a;
     padding: 0px;
+    max-height: 24px;
 }
 
 QLabel#headerLogo {
@@ -303,11 +304,12 @@ QPushButton#headerButton {
     background-color: #3a3a3a;
     border: none;
     border-radius: 2px;
-    padding: 2px 8px;
+    padding: 1px 8px;
     color: #e0e0e0;
     font-weight: 500;
-    font-size: 10px;
+    font-size: 9px;
     min-width: 40px;
+    max-height: 18px;
 }
 
 QPushButton#headerButton:hover {
@@ -327,11 +329,12 @@ QPushButton#headerTransmitButton {
     background-color: #3a6a3a;
     border: none;
     border-radius: 2px;
-    padding: 2px 10px;
+    padding: 1px 10px;
     color: #ffffff;
     font-weight: bold;
-    font-size: 10px;
+    font-size: 9px;
     min-width: 60px;
+    max-height: 18px;
 }
 
 QPushButton#headerTransmitButton:hover {
