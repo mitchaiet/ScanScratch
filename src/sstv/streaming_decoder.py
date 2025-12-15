@@ -91,6 +91,31 @@ MODE_SPECS = {
         "gap_ms": 2.08,
         "color_order": "RGB",
     },
+    # Experimental custom high-resolution modes (not standard SSTV)
+    "Square1K": {
+        "width": 1024,
+        "height": 1024,
+        "sync_ms": 20.0,
+        "scan_ms": 250.0,
+        "gap_ms": 2.0,
+        "color_order": "RGB",
+    },
+    "HD720": {
+        "width": 1280,
+        "height": 720,
+        "sync_ms": 20.0,
+        "scan_ms": 300.0,
+        "gap_ms": 2.0,
+        "color_order": "RGB",
+    },
+    "Square2K": {
+        "width": 2048,
+        "height": 2048,
+        "sync_ms": 20.0,
+        "scan_ms": 500.0,
+        "gap_ms": 2.0,
+        "color_order": "RGB",
+    },
 }
 
 

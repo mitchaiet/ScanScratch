@@ -388,6 +388,7 @@ class ParamsPanel(QWidget):
         sstv_group = QGroupBox("SSTV Mode")
         sstv_layout = QVBoxLayout(sstv_group)
         self.mode_combo = QComboBox()
+        # Standard SSTV modes
         self.mode_combo.addItems([
             "Martin M1",
             "Martin M2",
@@ -398,6 +399,16 @@ class ParamsPanel(QWidget):
             "PD 120",
             "PD 180",
             "PD 290",
+        ])
+        # Add separator
+        self.mode_combo.insertSeparator(self.mode_combo.count())
+        # Experimental high-resolution modes
+        self.mode_combo.addItem("─── Experimental ───")
+        self.mode_combo.model().item(self.mode_combo.count() - 1).setEnabled(False)
+        self.mode_combo.addItems([
+            "Square 1K (1024×1024)",
+            "HD 720 (1280×720)",
+            "Square 2K (2048×2048)",
         ])
         sstv_layout.addWidget(self.mode_combo)
         scroll_layout.addWidget(sstv_group)
@@ -743,6 +754,10 @@ class ParamsPanel(QWidget):
             "PD 120": "PD120",
             "PD 180": "PD180",
             "PD 290": "PD290",
+            # Experimental modes
+            "Square 1K (1024×1024)": "Square1K",
+            "HD 720 (1280×720)": "HD720",
+            "Square 2K (2048×2048)": "Square2K",
         }
 
         return {

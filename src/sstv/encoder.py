@@ -31,7 +31,97 @@ MODE_SPECS = {
     "PD120": {"class": PD120, "width": 640, "height": 496},
     "PD180": {"class": PD180, "width": 640, "height": 496},
     "PD290": {"class": PD290, "width": 800, "height": 616},
+    # Experimental custom modes (no pysstv class, use custom encoder)
+    "Square1K": {"class": None, "width": 1024, "height": 1024},
+    "HD720": {"class": None, "width": 1280, "height": 720},
+    "Square2K": {"class": None, "width": 2048, "height": 2048},
 }
+
+
+def encode_custom_mode(image: Image.Image, mode: str, sample_rate: int) -> np.ndarray:
+    """
+    Custom SSTV encoder for experimental high-resolution modes.
+    Generates SSTV audio directly without using pysstv.
+    """
+    from .streaming_decoder import MODE_SPECS as DECODER_SPECS
+
+    if mode not in DECODER_SPECS:
+        raise ValueError(f"Unknown custom mode: {mode}")
+
+    spec = DECODER_SPECS[mode]
+    width = spec["width"]
+    height = spec["height"]
+
+    # SSTV frequency constants
+    FREQ_SYNC = 1200
+    FREQ_BLACK = 1500
+    FREQ_WHITE = 2300
+
+    # Convert timings to samples
+    ms_to_samples = sample_rate / 1000.0
+    sync_samples = int(spec["sync_ms"] * ms_to_samples)
+    scan_samples = int(spec["scan_ms"] * ms_to_samples)
+    gap_samples = int(spec["gap_ms"] * ms_to_samples)
+
+    # Generate header (VIS code) - simplified version
+    header_samples = int(910 * ms_to_samples)  # 910ms header
+    header = np.ones(header_samples) * FREQ_SYNC
+
+    audio_chunks = [header]
+
+    # Get pixel data
+    pixels = np.array(image)
+
+    # Encode each scanline
+    for y in range(height):
+        line_pixels = pixels[y]
+
+        # Sync pulse
+        t = np.linspace(0, spec["sync_ms"]/1000, sync_samples, endpoint=False)
+        sync = np.sin(2 * np.pi * FREQ_SYNC * t)
+        audio_chunks.append(sync)
+
+        # Gap
+        t_gap = np.linspace(0, spec["gap_ms"]/1000, gap_samples, endpoint=False)
+        gap = np.sin(2 * np.pi * FREQ_SYNC * t_gap)
+        audio_chunks.append(gap)
+
+        # Encode R, G, B channels
+        for channel_idx in [0, 1, 2]:  # RGB order
+            channel_data = line_pixels[:, channel_idx]
+
+            # Map pixel values (0-255) to frequencies (1500-2300 Hz)
+            freqs = FREQ_BLACK + (channel_data / 255.0) * (FREQ_WHITE - FREQ_BLACK)
+
+            # Generate audio for this channel
+            t_scan = np.linspace(0, spec["scan_ms"]/1000, scan_samples, endpoint=False)
+            channel_audio = np.zeros(scan_samples)
+
+            # Divide scanline into chunks and generate frequency for each
+            samples_per_pixel = scan_samples // width
+            for x in range(width):
+                start_idx = x * samples_per_pixel
+                end_idx = start_idx + samples_per_pixel
+                if end_idx > scan_samples:
+                    end_idx = scan_samples
+
+                freq = freqs[x]
+                t_chunk = t_scan[start_idx:end_idx]
+                channel_audio[start_idx:end_idx] = np.sin(2 * np.pi * freq * t_chunk)
+
+            audio_chunks.append(channel_audio)
+
+            # Gap after channel
+            audio_chunks.append(gap.copy())
+
+    # Concatenate all audio
+    audio = np.concatenate(audio_chunks)
+
+    # Normalize to float32 [-1, 1]
+    audio = audio.astype(np.float32)
+    audio = np.clip(audio, -1.0, 1.0)
+
+    return audio
 
 
 def fit_image_to_frame(image: Image.Image, frame_width: int, frame_height: int) -> tuple[Image.Image, tuple[int, int, int, int]]:
@@ -123,15 +213,20 @@ class SSTVEncoder:
             fitted = image.resize((frame_width, frame_height), Image.Resampling.LANCZOS)
             self.last_crop_box = (0, 0, frame_width, frame_height)
 
-        # Create SSTV encoder
-        sstv = sstv_class(fitted, self.sample_rate, bits=16)
+        # Check if this is a custom mode or standard pysstv mode
+        if sstv_class is None:
+            # Use custom encoder for experimental modes
+            audio = encode_custom_mode(fitted, mode, self.sample_rate)
+        else:
+            # Use pysstv for standard modes
+            sstv = sstv_class(fitted, self.sample_rate, bits=16)
 
-        # Generate audio samples
-        samples = list(sstv.gen_samples())
+            # Generate audio samples
+            samples = list(sstv.gen_samples())
 
-        # Convert to numpy array and normalize to float32 [-1, 1]
-        audio = np.array(samples, dtype=np.float32)
-        audio = audio / 32768.0  # Normalize 16-bit to float
+            # Convert to numpy array and normalize to float32 [-1, 1]
+            audio = np.array(samples, dtype=np.float32)
+            audio = audio / 32768.0  # Normalize 16-bit to float
 
         return audio, self.sample_rate
 
