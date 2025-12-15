@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QStatusBar,
     QToolBar,
+    QSizePolicy,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize
 from PyQt6.QtGui import QAction, QKeySequence, QGuiApplication, QIcon
@@ -334,7 +335,7 @@ class MainWindow(QMainWindow):
 
         # Add stretch to push remaining items to the right
         spacer = QWidget()
-        spacer.setSizePolicy(QWidget().sizePolicy().Expanding, QWidget().sizePolicy().Preferred)
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
 
         # Help

@@ -252,4 +252,28 @@ QProgressBar::chunk {
     background-color: #5a8a5a;
     border-radius: 4px;
 }
+
+QFrame#logoFrame {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #2a2a2a, stop:0.5 #353535, stop:1 #2a2a2a);
+    border: none;
+    border-bottom: 2px solid #4a7a4a;
+    border-radius: 0px;
+    padding: 12px;
+}
+
+QLabel#logoLabel {
+    color: #6a9a6a;
+    font-weight: bold;
+    letter-spacing: 3px;
+    padding: 2px;
+}
+
+QLabel#tagline {
+    color: #777;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    padding: 0px;
+}
 """

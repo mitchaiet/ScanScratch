@@ -13,8 +13,10 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSpacerItem,
     QSizePolicy,
+    QFrame,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont
 import numpy as np
 
 from .audio_visualizer import AudioVisualizer
@@ -218,10 +220,32 @@ class ParamsPanel(QWidget):
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(8)
 
-        # Title
-        title = QLabel("PARAMETERS")
-        title.setObjectName("title")
-        main_layout.addWidget(title)
+        # Logo header - horizontal single line design
+        logo_frame = QFrame()
+        logo_frame.setObjectName("logoFrame")
+        logo_layout = QVBoxLayout(logo_frame)
+        logo_layout.setContentsMargins(8, 6, 8, 6)
+        logo_layout.setSpacing(2)
+
+        # Single line logo with glitch aesthetic
+        logo_text = "▓▒░  S C A N S C R A T C H  ░▒▓"
+        logo_label = QLabel(logo_text)
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_font = QFont()
+        logo_font.setPixelSize(18)
+        logo_font.setBold(True)
+        logo_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3)
+        logo_label.setFont(logo_font)
+        logo_label.setObjectName("logoLabel")
+        logo_layout.addWidget(logo_label)
+
+        # Tagline
+        tagline = QLabel("SSTV GLITCH ART GENERATOR")
+        tagline.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tagline.setObjectName("tagline")
+        logo_layout.addWidget(tagline)
+
+        main_layout.addWidget(logo_frame)
 
         # Scroll area for controls
         scroll = QScrollArea()
