@@ -1,0 +1,1 @@
+# ScanScratch - SSTV Glitch Editor

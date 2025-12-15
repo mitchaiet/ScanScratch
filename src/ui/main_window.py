@@ -1,0 +1,558 @@
+"""Main application window with triple-pane layout."""
+
+from PyQt6.QtWidgets import (
+    QMainWindow,
+    QWidget,
+    QHBoxLayout,
+    QSplitter,
+    QFileDialog,
+    QMessageBox,
+    QLabel,
+    QStatusBar,
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QAction, QKeySequence, QGuiApplication
+from PIL import Image
+import numpy as np
+import time
+import os
+
+from .image_viewer import ImageViewer
+from .params_panel import ParamsPanel
+from .export_dialog import ExportDialog
+
+
+class StreamingTransmissionWorker(QThread):
+    """Worker that plays audio live and decodes line-by-line with A/B comparison."""
+
+    progress = pyqtSignal(int)
+    status_message = pyqtSignal(str)  # Detailed status updates
+    line_decoded = pyqtSignal(int, object)  # line_number, numpy rgb array (with effects)
+    clean_line_decoded = pyqtSignal(int, object)  # line_number, numpy rgb array (clean)
+    encoding_done = pyqtSignal(object)  # crop_box tuple
+    audio_ready = pyqtSignal(object, int)  # audio_data, sample_rate
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, source_image: Image.Image, settings: dict):
+        super().__init__()
+        self.source_image = source_image
+        self.settings = settings
+        self._stop_requested = False
+
+    def stop(self):
+        """Request the worker to stop."""
+        self._stop_requested = True
+
+    def run(self):
+        """Run streaming transmission with live audio and progressive A/B decode."""
+        import sounddevice as sd
+        from ..sstv import SSTVEncoder
+        from ..sstv.streaming_decoder import StreamingDecoder
+        from ..effects import EffectsPipeline
+
+        try:
+            # Emit immediately to show we've started
+            self.progress.emit(1)
+            self.status_message.emit("Initializing transmission...")
+
+            mode = self.settings.get("sstv_mode", "MartinM1")
+
+            # Step 1: Encode image to SSTV audio (with aspect ratio preservation)
+            self.status_message.emit(f"Encoding image to {mode} SSTV signal...")
+            self.progress.emit(5)
+            encoder = SSTVEncoder()
+            clean_audio, sample_rate = encoder.encode(self.source_image, mode=mode, preserve_aspect=True)
+            crop_box = encoder.get_crop_box()
+            self.encoding_done.emit(crop_box)
+            self.progress.emit(10)
+
+            # Step 2: Apply audio effects to create affected version
+            self.status_message.emit("Applying audio effects...")
+            self.progress.emit(12)
+            pipeline = EffectsPipeline(sample_rate)
+            pipeline.configure(self.settings)
+            affected_audio = pipeline.process(clean_audio)
+            self.progress.emit(15)
+
+            # Send affected audio to visualizer and playback
+            self.status_message.emit("Starting transmission playback...")
+            self.audio_ready.emit(affected_audio, sample_rate)
+
+            # Step 3: Set up streaming decoder for affected version
+            decoder_affected = StreamingDecoder(sample_rate, mode)
+            total_lines = decoder_affected.height
+            header_duration = decoder_affected.get_header_duration()
+            line_duration = decoder_affected.get_line_duration()
+
+            # Step 4: Start audio playback (only affected audio is played)
+            self.status_message.emit(f"Transmitting {total_lines} scanlines...")
+            sd.play(affected_audio, sample_rate)
+
+            # Step 5: Decode affected version live, sync with audio playback
+            start_time = time.time()
+
+            for line_num, rgb_line in decoder_affected.decode_progressive(affected_audio):
+                if self._stop_requested:
+                    sd.stop()
+                    break
+
+                # Calculate when this line should appear based on audio timing
+                target_time = header_duration + (line_num + 1) * line_duration
+                elapsed = time.time() - start_time
+
+                # Wait for audio to catch up
+                if elapsed < target_time:
+                    sleep_time = target_time - elapsed
+                    while sleep_time > 0 and not self._stop_requested:
+                        time.sleep(min(0.05, sleep_time))
+                        sleep_time -= 0.05
+
+                # Emit the decoded line
+                self.line_decoded.emit(line_num, rgb_line)
+
+                # Update progress and status (15% to 85% during affected decode)
+                progress = 15 + int((line_num / total_lines) * 70)
+                self.progress.emit(progress)
+
+                # Update status every 32 lines
+                if line_num % 32 == 0:
+                    percent_complete = int((line_num / total_lines) * 100)
+                    self.status_message.emit(f"Decoding: {percent_complete}% ({line_num}/{total_lines} lines)")
+
+            # Wait for audio to finish
+            if not self._stop_requested:
+                remaining = decoder_affected.get_total_duration() - (time.time() - start_time)
+                if remaining > 0:
+                    time.sleep(remaining)
+
+            sd.stop()
+
+            # Step 6: Quickly decode clean version (no audio, just fast image processing)
+            if not self._stop_requested:
+                self.status_message.emit("Processing clean reference...")
+                self.progress.emit(90)
+                decoder_clean = StreamingDecoder(sample_rate, mode)
+                clean_lines = list(decoder_clean.decode_progressive(clean_audio))
+                for line_num, rgb_line in clean_lines:
+                    if self._stop_requested:
+                        break
+                    self.clean_line_decoded.emit(line_num, rgb_line)
+                self.progress.emit(98)
+
+            self.status_message.emit("Transmission complete!")
+            self.progress.emit(100)
+            self.finished.emit()
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.error.emit(str(e))
+            self.finished.emit()
+
+
+class MainWindow(QMainWindow):
+    """Main application window."""
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("ScanScratch - SSTV Glitch Editor")
+        self.setMinimumSize(1200, 700)
+        self.resize(1400, 800)
+
+        self._worker = None
+        self._output_image_data = None  # Affected version
+        self._clean_image_data = None  # Clean version (no effects)
+        self._crop_box = None  # For removing letterbox/pillarbox
+        self._showing_clean = False  # A/B toggle state
+
+        # Create central widget
+        central = QWidget()
+        self.setCentralWidget(central)
+
+        # Main layout
+        layout = QHBoxLayout(central)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(0)
+
+        # Create splitter for three panes
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(8)
+
+        # Left pane: Source image viewer
+        self.source_viewer = ImageViewer(title="SOURCE", accept_drops=True)
+        splitter.addWidget(self.source_viewer)
+
+        # Middle pane: Parameters
+        self.params_panel = ParamsPanel()
+        splitter.addWidget(self.params_panel)
+
+        # Right pane: Output image viewer with A/B toggle
+        self.output_viewer = ImageViewer(title="OUTPUT", accept_drops=False, show_ab_toggle=True)
+        self.output_viewer.ab_toggled.connect(self._on_ab_toggled)
+        splitter.addWidget(self.output_viewer)
+
+        # Set initial sizes (left: 35%, middle: 30%, right: 35%)
+        splitter.setSizes([400, 350, 400])
+
+        layout.addWidget(splitter)
+
+        # Create menu bar
+        self._create_menu_bar()
+
+        # Create status bar
+        self._create_status_bar()
+
+        # Connect signals
+        self._connect_signals()
+
+    def _create_menu_bar(self):
+        """Create application menu bar."""
+        menubar = self.menuBar()
+
+        # File Menu
+        file_menu = menubar.addMenu("&File")
+
+        # Open
+        open_action = QAction("&Open Image...", self)
+        open_action.setShortcut(QKeySequence.StandardKey.Open)
+        open_action.triggered.connect(self._on_open_file)
+        file_menu.addAction(open_action)
+
+        file_menu.addSeparator()
+
+        # Export
+        self.export_action = QAction("&Export Output...", self)
+        self.export_action.setShortcut(QKeySequence("Ctrl+E"))
+        self.export_action.setEnabled(False)
+        self.export_action.triggered.connect(self._on_export)
+        file_menu.addAction(self.export_action)
+
+        # Copy to Clipboard
+        self.copy_action = QAction("&Copy Output to Clipboard", self)
+        self.copy_action.setShortcut(QKeySequence.StandardKey.Copy)
+        self.copy_action.setEnabled(False)
+        self.copy_action.triggered.connect(self._on_copy_output)
+        file_menu.addAction(self.copy_action)
+
+        file_menu.addSeparator()
+
+        # Quit
+        quit_action = QAction("&Quit", self)
+        quit_action.setShortcut(QKeySequence.StandardKey.Quit)
+        quit_action.triggered.connect(self.close)
+        file_menu.addAction(quit_action)
+
+        # Edit Menu
+        edit_menu = menubar.addMenu("&Edit")
+
+        # Reset All Effects
+        reset_action = QAction("&Reset All Effects", self)
+        reset_action.setShortcut(QKeySequence("Ctrl+R"))
+        reset_action.triggered.connect(self._on_reset_effects)
+        edit_menu.addAction(reset_action)
+
+        # View Menu
+        view_menu = menubar.addMenu("&View")
+
+        # Zoom controls would go here
+        self.fit_source_action = QAction("Fit Source to Window", self)
+        self.fit_source_action.setShortcut(QKeySequence("Ctrl+1"))
+        self.fit_source_action.triggered.connect(lambda: self.source_viewer.fit_to_window())
+        view_menu.addAction(self.fit_source_action)
+
+        self.fit_output_action = QAction("Fit Output to Window", self)
+        self.fit_output_action.setShortcut(QKeySequence("Ctrl+2"))
+        self.fit_output_action.triggered.connect(lambda: self.output_viewer.fit_to_window())
+        view_menu.addAction(self.fit_output_action)
+
+        # Help Menu
+        help_menu = menubar.addMenu("&Help")
+
+        # Keyboard shortcuts
+        shortcuts_action = QAction("&Keyboard Shortcuts", self)
+        shortcuts_action.setShortcut(QKeySequence("Ctrl+/"))
+        shortcuts_action.triggered.connect(self._show_shortcuts)
+        help_menu.addAction(shortcuts_action)
+
+        help_menu.addSeparator()
+
+        # About
+        about_action = QAction("&About ScanScratch", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
+
+    def _create_status_bar(self):
+        """Create status bar with image info."""
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+
+        self.status_label = QLabel("Ready")
+        self.status_bar.addWidget(self.status_label)
+
+        self.image_info_label = QLabel("")
+        self.status_bar.addPermanentWidget(self.image_info_label)
+
+    def _connect_signals(self):
+        """Connect widget signals."""
+        self.source_viewer.image_loaded.connect(self._on_source_loaded)
+        self.params_panel.transmit_requested.connect(self._on_transmit)
+
+    def _on_open_file(self):
+        """Open file dialog to load an image."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Image",
+            "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp);;All Files (*)"
+        )
+        if file_path:
+            self.source_viewer.load_image(file_path)
+
+    def _on_export(self):
+        """Export the output image (currently displayed version)."""
+        # Use currently displayed version (clean or affected)
+        image_data = self._clean_image_data if self._showing_clean else self._output_image_data
+
+        if image_data is None:
+            QMessageBox.warning(self, "No Output", "There is no output image to export.")
+            return
+
+        # Convert to PIL Image
+        img = Image.fromarray(image_data, mode='RGB')
+
+        # Apply crop if available
+        if self._crop_box is not None:
+            left, top, right, bottom = self._crop_box
+            left = max(0, left)
+            top = max(0, top)
+            right = min(img.width, right)
+            bottom = min(img.height, bottom)
+            if right > left and bottom > top:
+                img = img.crop((left, top, right, bottom))
+
+        # Show export dialog
+        dialog = ExportDialog(img, self)
+        if dialog.exec():
+            export_path = dialog.get_export_path()
+            if export_path:
+                self.status_label.setText(f"Exported to {os.path.basename(export_path)}")
+                QTimer.singleShot(3000, lambda: self.status_label.setText("Ready"))
+
+    def _on_copy_output(self):
+        """Copy output image to clipboard (currently displayed version)."""
+        # Use currently displayed version (clean or affected)
+        image_data = self._clean_image_data if self._showing_clean else self._output_image_data
+
+        if image_data is None:
+            return
+
+        # Convert to PIL Image
+        img = Image.fromarray(image_data, mode='RGB')
+
+        # Apply crop if available
+        if self._crop_box is not None:
+            left, top, right, bottom = self._crop_box
+            left = max(0, left)
+            top = max(0, top)
+            right = min(img.width, right)
+            bottom = min(img.height, bottom)
+            if right > left and bottom > top:
+                img = img.crop((left, top, right, bottom))
+
+        # Convert to QImage and copy to clipboard
+        from PyQt6.QtGui import QImage
+        from io import BytesIO
+
+        # Convert PIL to QImage
+        buffer = BytesIO()
+        img.save(buffer, format='PNG')
+        buffer.seek(0)
+
+        qimg = QImage()
+        qimg.loadFromData(buffer.read())
+
+        clipboard = QGuiApplication.clipboard()
+        clipboard.setImage(qimg)
+
+        self.status_label.setText("Output copied to clipboard")
+        QTimer.singleShot(2000, lambda: self.status_label.setText("Ready"))
+
+    def _on_reset_effects(self):
+        """Reset all effects to clean preset."""
+        self.params_panel.preset_combo.setCurrentText("Clean")
+
+    def _show_shortcuts(self):
+        """Show keyboard shortcuts dialog."""
+        shortcuts_text = """
+<h3>Keyboard Shortcuts</h3>
+<table cellpadding="8">
+<tr><td><b>Ctrl+O</b></td><td>Open Image</td></tr>
+<tr><td><b>Ctrl+E</b></td><td>Export Output</td></tr>
+<tr><td><b>Ctrl+C</b></td><td>Copy Output to Clipboard</td></tr>
+<tr><td><b>Ctrl+R</b></td><td>Reset All Effects</td></tr>
+<tr><td><b>Ctrl+1</b></td><td>Fit Source to Window</td></tr>
+<tr><td><b>Ctrl+2</b></td><td>Fit Output to Window</td></tr>
+<tr><td><b>Ctrl+/</b></td><td>Show Shortcuts</td></tr>
+<tr><td><b>Ctrl+Q</b></td><td>Quit Application</td></tr>
+<tr><td><b>Space</b></td><td>Transmit (when focused)</td></tr>
+</table>
+        """
+        QMessageBox.information(self, "Keyboard Shortcuts", shortcuts_text)
+
+    def _show_about(self):
+        """Show about dialog."""
+        about_text = """
+<h2>ScanScratch</h2>
+<p><b>SSTV Glitch Editor</b></p>
+<p>Version 1.0</p>
+<br>
+<p>A creative tool for generating glitch art through<br>
+SSTV (Slow Scan Television) signal corruption.</p>
+<br>
+<p>Encode images to audio, apply effects, and decode<br>
+to create unique visual artifacts.</p>
+        """
+        QMessageBox.about(self, "About ScanScratch", about_text)
+
+    def _update_status_bar(self):
+        """Update status bar with current image information."""
+        source_img = self.source_viewer.get_image()
+        if source_img:
+            w, h = source_img.size
+            self.image_info_label.setText(f"Source: {w}×{h}px")
+        else:
+            self.image_info_label.setText("")
+
+    def _on_source_loaded(self):
+        """Handle source image loaded."""
+        self.params_panel.set_transmit_enabled(True)
+        self._update_status_bar()
+        self.status_label.setText("Image loaded - ready to transmit")
+
+    def _on_transmit(self):
+        """Handle transmit button click."""
+        source_image = self.source_viewer.get_image()
+        if source_image is None:
+            return
+
+        # Stop any existing transmission
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.stop()
+            self._worker.wait()
+
+        # Get settings and determine output size
+        effect_settings = self.params_panel.get_effect_settings()
+        mode = effect_settings.get("sstv_mode", "MartinM1")
+
+        # Get dimensions for this mode
+        from ..sstv.streaming_decoder import MODE_SPECS
+        spec = MODE_SPECS.get(mode, MODE_SPECS["MartinM1"])
+        width, height = spec["width"], spec["height"]
+
+        # Initialize blank output images (full frame) for both versions
+        self._output_image_data = np.zeros((height, width, 3), dtype=np.uint8)
+        self._clean_image_data = np.zeros((height, width, 3), dtype=np.uint8)
+        self._crop_box = None
+        self._showing_clean = False
+        self._update_output_display()
+
+        # Disable transmit during processing
+        self.params_panel.set_transmit_enabled(False)
+        self.params_panel.set_progress(0)
+        self.status_label.setText("Transmitting...")
+        self.export_action.setEnabled(False)
+        self.copy_action.setEnabled(False)
+
+        # Create and start worker
+        self._worker = StreamingTransmissionWorker(source_image, effect_settings)
+        self._worker.progress.connect(self._on_progress)
+        self._worker.status_message.connect(self._on_status_message)
+        self._worker.encoding_done.connect(self._on_encoding_done)
+        self._worker.audio_ready.connect(self._on_audio_ready)
+        self._worker.line_decoded.connect(self._on_line_decoded)
+        self._worker.clean_line_decoded.connect(self._on_clean_line_decoded)
+        self._worker.finished.connect(self._on_transmission_finished)
+        self._worker.error.connect(self._on_transmission_error)
+        self._worker.start()
+
+    def _on_progress(self, value: int):
+        """Handle progress update."""
+        self.params_panel.set_progress(value)
+
+    def _on_status_message(self, message: str):
+        """Handle detailed status message updates."""
+        self.status_label.setText(message)
+
+    def _on_encoding_done(self, crop_box):
+        """Store crop box for output cropping."""
+        self._crop_box = crop_box
+
+    def _on_audio_ready(self, audio_data, sample_rate):
+        """Set up audio visualizer with the processed audio."""
+        self.params_panel.set_audio_data(audio_data, sample_rate)
+
+    def _on_line_decoded(self, line_num: int, rgb_line: np.ndarray):
+        """Handle a decoded line from affected stream - update the output image."""
+        if self._output_image_data is not None and line_num < len(self._output_image_data):
+            self._output_image_data[line_num] = rgb_line
+            if not self._showing_clean:
+                self._update_output_display()
+
+    def _on_clean_line_decoded(self, line_num: int, rgb_line: np.ndarray):
+        """Handle a decoded line from clean stream - update the clean image."""
+        if self._clean_image_data is not None and line_num < len(self._clean_image_data):
+            self._clean_image_data[line_num] = rgb_line
+            if self._showing_clean:
+                self._update_output_display()
+
+    def _on_ab_toggled(self, showing_clean: bool):
+        """Handle A/B toggle - switch between clean and affected versions."""
+        self._showing_clean = showing_clean
+        self._update_output_display()
+
+    def _update_output_display(self):
+        """Update the output viewer with current image data (clean or affected)."""
+        # Choose which version to display based on A/B toggle state
+        image_data = self._clean_image_data if self._showing_clean else self._output_image_data
+
+        if image_data is not None:
+            img = Image.fromarray(image_data, mode='RGB')
+
+            # Crop to remove letterbox/pillarbox if we have crop info
+            if self._crop_box is not None:
+                left, top, right, bottom = self._crop_box
+                # Make sure crop box is within bounds
+                left = max(0, left)
+                top = max(0, top)
+                right = min(img.width, right)
+                bottom = min(img.height, bottom)
+                if right > left and bottom > top:
+                    img = img.crop((left, top, right, bottom))
+
+            self.output_viewer.set_image(img)
+
+    def _on_transmission_finished(self):
+        """Handle transmission complete."""
+        self.params_panel.set_transmit_enabled(True)
+        self.params_panel.stop_audio_visualization()
+        self.export_action.setEnabled(True)
+        self.copy_action.setEnabled(True)
+        self.output_viewer.enable_ab_toggle(True)
+        # Status message already set by worker ("Transmission complete!")
+        # Add A/B toggle hint
+        QTimer.singleShot(500, lambda: self.status_label.setText("Transmission complete - toggle A/B to compare versions"))
+        QTimer.singleShot(1000, lambda: self.params_panel.set_progress(0))
+        QTimer.singleShot(8000, lambda: self.status_label.setText("Ready"))
+
+    def _on_transmission_error(self, error_msg: str):
+        """Handle transmission error."""
+        print(f"Transmission error: {error_msg}")
+        self.params_panel.set_transmit_enabled(True)
+
+    def closeEvent(self, event):
+        """Handle window close - stop any running transmission."""
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.stop()
+            self._worker.wait()
+        event.accept()
