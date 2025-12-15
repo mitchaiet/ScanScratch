@@ -127,10 +127,19 @@ class StreamingDecoder:
 
         Each rgb_line is shape (width, 3) with uint8 RGB values.
         """
+        print(f"decode_progressive: Starting demodulation of {len(audio)} samples...", flush=True)
         # Demodulate entire signal first (needed for filtering)
-        freq = self._demodulate_fm(audio)
+        try:
+            freq = self._demodulate_fm(audio)
+            print(f"✓ Demodulation complete, freq array length: {len(freq)}", flush=True)
+        except Exception as e:
+            print(f"!!! CRASH during FM demodulation: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            raise
 
         # Process each line
+        print(f"Starting line-by-line decode ({self.height} lines)...", flush=True)
         for line_num in range(self.height):
             # Use float arithmetic and round only when indexing
             line_start = int(round(self.header_samples + line_num * self.line_samples))
@@ -144,21 +153,53 @@ class StreamingDecoder:
 
     def _demodulate_fm(self, audio: np.ndarray) -> np.ndarray:
         """Demodulate FM to get instantaneous frequency."""
-        # Bandpass filter
-        filtered = signal.filtfilt(self.filter_b, self.filter_a, audio)
+        print(f"  _demodulate_fm: Starting bandpass filter on {len(audio)} samples...", flush=True)
+        print(f"    Audio dtype: {audio.dtype}, min: {audio.min():.3f}, max: {audio.max():.3f}", flush=True)
+        print(f"    Filter coefficients - a: len={len(self.filter_a)}, b: len={len(self.filter_b)}", flush=True)
+
+        # Bandpass filter - use lfilter instead of filtfilt for large arrays (much faster)
+        try:
+            print(f"    Calling signal.lfilter (forward pass only, more efficient)...", flush=True)
+            # Use lfilter instead of filtfilt - it's much faster and uses less memory
+            # filtfilt does forward + backward pass, but lfilter is single-pass
+            filtered = signal.lfilter(self.filter_b, self.filter_a, audio)
+            print(f"  ✓ Bandpass filter complete (filtered.shape={filtered.shape})", flush=True)
+        except Exception as e:
+            print(f"  !!! lfilter crashed: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            raise
 
         # Hilbert transform for analytic signal
-        analytic = signal.hilbert(filtered)
+        print(f"  Starting Hilbert transform...", flush=True)
+        try:
+            analytic = signal.hilbert(filtered)
+            print(f"  ✓ Hilbert transform complete", flush=True)
+        except Exception as e:
+            print(f"  !!! hilbert crashed: {e}", flush=True)
+            raise
 
         # Instantaneous phase and frequency
-        phase = np.unwrap(np.angle(analytic))
-        freq = np.diff(phase) * self.sample_rate / (2 * np.pi)
-        freq = np.append(freq, freq[-1])
+        print(f"  Computing instantaneous frequency...", flush=True)
+        try:
+            phase = np.unwrap(np.angle(analytic))
+            freq = np.diff(phase) * self.sample_rate / (2 * np.pi)
+            freq = np.append(freq, freq[-1])
+            print(f"  ✓ Frequency computed", flush=True)
+        except Exception as e:
+            print(f"  !!! frequency computation crashed: {e}", flush=True)
+            raise
 
         # Light smoothing
-        window_size = max(1, int(self.sample_rate / 8000))
-        if window_size > 1:
-            freq = np.convolve(freq, np.ones(window_size)/window_size, mode='same')
+        print(f"  Applying smoothing filter...", flush=True)
+        try:
+            window_size = max(1, int(self.sample_rate / 8000))
+            if window_size > 1:
+                freq = np.convolve(freq, np.ones(window_size)/window_size, mode='same')
+            print(f"  ✓ Smoothing complete, returning freq array", flush=True)
+        except Exception as e:
+            print(f"  !!! smoothing crashed: {e}", flush=True)
+            raise
 
         return freq
 

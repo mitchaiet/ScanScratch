@@ -141,35 +141,75 @@ class ParamsPanel(QWidget):
     # Glitch presets - tuned for maximum visual impact
     PRESETS = {
         "Clean": {},
-        "VHS Tracking Error": {
-            "phasemod_enabled": True, "phasemod_depth": 65, "phasemod_rate": 4.5,
-            "syncwobble_enabled": True, "syncwobble_amount": 50, "syncwobble_freq": 3.5,
-            "noise_enabled": True, "noise_amount": 40, "noise_type": "Crackle",
-            "distortion_enabled": True, "distortion_drive": 55, "distortion_clip": 65,
+
+        # ===== AESTHETIC PRESETS (Image Still Recognizable) =====
+        "Vintage VHS": {
+            "noise_enabled": True, "noise_amount": 12, "noise_type": "Crackle",
+            "syncwobble_enabled": True, "syncwobble_amount": 18, "syncwobble_freq": 2.5,
+            "phasemod_enabled": True, "phasemod_depth": 15, "phasemod_rate": 3,
+            "distortion_enabled": True, "distortion_drive": 25, "distortion_clip": 70,
         },
+        "Lo-Fi Aesthetic": {
+            "bitcrush_enabled": True, "bitcrush_bits": 6, "bitcrush_rate": 22050,
+            "noise_enabled": True, "noise_amount": 8, "noise_type": "Pink",
+            "harmonic_enabled": True, "harmonic_amount": 20, "harmonic_count": 2,
+        },
+        "Analog Warmth": {
+            "phasemod_enabled": True, "phasemod_depth": 10, "phasemod_rate": 1.5,
+            "harmonic_enabled": True, "harmonic_amount": 15, "harmonic_count": 2,
+            "noise_enabled": True, "noise_amount": 5, "noise_type": "Pink",
+        },
+        "Retro Broadcast": {
+            "syncwobble_enabled": True, "syncwobble_amount": 12, "syncwobble_freq": 1.8,
+            "freqshift_enabled": True, "freqshift_hz": 45,
+            "noise_enabled": True, "noise_amount": 10, "noise_type": "Gaussian",
+        },
+        "Film Grain": {
+            "noise_enabled": True, "noise_amount": 18, "noise_type": "Gaussian",
+            "harmonic_enabled": True, "harmonic_amount": 10, "harmonic_count": 1,
+            "bitcrush_enabled": True, "bitcrush_bits": 7, "bitcrush_rate": 33075,
+        },
+        "Pastel Dream": {
+            "freqshift_enabled": True, "freqshift_hz": 80,
+            "phasemod_enabled": True, "phasemod_depth": 20, "phasemod_rate": 5,
+            "harmonic_enabled": True, "harmonic_amount": 25, "harmonic_count": 2,
+        },
+        "Subtle Glitch": {
+            "scanline_enabled": True, "scanline_freq": 8, "scanline_intensity": 35,
+            "phasemod_enabled": True, "phasemod_depth": 12, "phasemod_rate": 6,
+            "noise_enabled": True, "noise_amount": 6, "noise_type": "Crackle",
+        },
+        "Soft Corruption": {
+            "syncwobble_enabled": True, "syncwobble_amount": 22, "syncwobble_freq": 4,
+            "scanline_enabled": True, "scanline_freq": 12, "scanline_intensity": 45,
+            "harmonic_enabled": True, "harmonic_amount": 18, "harmonic_count": 2,
+        },
+
+        # ===== MODERATE PRESETS (Noticeable but Controlled) =====
+        "VHS Tracking Error": {
+            "phasemod_enabled": True, "phasemod_depth": 40, "phasemod_rate": 4.5,
+            "syncwobble_enabled": True, "syncwobble_amount": 35, "syncwobble_freq": 3.5,
+            "noise_enabled": True, "noise_amount": 25, "noise_type": "Crackle",
+            "distortion_enabled": True, "distortion_drive": 35, "distortion_clip": 65,
+        },
+        "Chromatic Aberration": {
+            "phasemod_enabled": True, "phasemod_depth": 30, "phasemod_rate": 12,
+            "freqshift_enabled": True, "freqshift_hz": 150,
+            "delay_enabled": True, "delay_time": 3, "delay_feedback": 25, "delay_mix": 40,
+            "harmonic_enabled": True, "harmonic_amount": 30, "harmonic_count": 2,
+        },
+        "Signal Dropout": {
+            "syncdropout_enabled": True, "syncdropout_prob": 20, "syncdropout_duration": 8,
+            "scanline_enabled": True, "scanline_freq": 18, "scanline_intensity": 55,
+            "noise_enabled": True, "noise_amount": 30, "noise_type": "Crackle",
+        },
+
+        # ===== EXTREME PRESETS (Heavy Glitch) =====
         "Digital Meltdown": {
             "bitcrush_enabled": True, "bitcrush_bits": 2, "bitcrush_rate": 4400,
             "harmonic_enabled": True, "harmonic_amount": 70, "harmonic_count": 4,
-            "scanline_enabled": True, "scanline_freq": 25, "scanline_intensity": 85,
+            "scanline_enabled": True, "scanline_freq": 35, "scanline_intensity": 85,
             "freqshift_enabled": True, "freqshift_hz": -150,
-        },
-        "Chromatic Aberration": {
-            "phasemod_enabled": True, "phasemod_depth": 40, "phasemod_rate": 15,
-            "freqshift_enabled": True, "freqshift_hz": 220,
-            "delay_enabled": True, "delay_time": 3, "delay_feedback": 30, "delay_mix": 50,
-            "harmonic_enabled": True, "harmonic_amount": 45, "harmonic_count": 3,
-        },
-        "Signal Dropout": {
-            "syncdropout_enabled": True, "syncdropout_prob": 35, "syncdropout_duration": 12,
-            "scanline_enabled": True, "scanline_freq": 30, "scanline_intensity": 90,
-            "noise_enabled": True, "noise_amount": 60, "noise_type": "Crackle",
-            "bandpass_enabled": True, "bandpass_low": 900, "bandpass_high": 2100,
-        },
-        "Amplitude Chaos": {
-            "ampmod_enabled": True, "ampmod_depth": 75, "ampmod_rate": 18,
-            "phasemod_enabled": True, "phasemod_depth": 55, "phasemod_rate": 6,
-            "distortion_enabled": True, "distortion_drive": 70, "distortion_clip": 45,
-            "harmonic_enabled": True, "harmonic_amount": 60, "harmonic_count": 4,
         },
         "Scanline Hell": {
             "scanline_enabled": True, "scanline_freq": 45, "scanline_intensity": 95,
@@ -177,31 +217,13 @@ class ParamsPanel(QWidget):
             "bitcrush_enabled": True, "bitcrush_bits": 3, "bitcrush_rate": 6000,
             "noise_enabled": True, "noise_amount": 55, "noise_type": "White",
         },
-        "Extreme Corruption": {
+        "Total Chaos": {
             "phasemod_enabled": True, "phasemod_depth": 85, "phasemod_rate": 10,
             "ampmod_enabled": True, "ampmod_depth": 70, "ampmod_rate": 14,
             "scanline_enabled": True, "scanline_freq": 40, "scanline_intensity": 90,
             "noise_enabled": True, "noise_amount": 75, "noise_type": "White",
             "bitcrush_enabled": True, "bitcrush_bits": 2, "bitcrush_rate": 3300,
             "distortion_enabled": True, "distortion_drive": 90, "distortion_clip": 35,
-            "harmonic_enabled": True, "harmonic_amount": 80, "harmonic_count": 5,
-            "freqshift_enabled": True, "freqshift_hz": -250,
-            "delay_enabled": True, "delay_time": 40, "delay_feedback": 85, "delay_mix": 50,
-        },
-        "Psychedelic Transmission": {
-            "phasemod_enabled": True, "phasemod_depth": 70, "phasemod_rate": 7,
-            "ampmod_enabled": True, "ampmod_depth": 60, "ampmod_rate": 11,
-            "harmonic_enabled": True, "harmonic_amount": 65, "harmonic_count": 4,
-            "delay_enabled": True, "delay_time": 90, "delay_feedback": 70, "delay_mix": 55,
-            "freqshift_enabled": True, "freqshift_hz": 180,
-        },
-        "Glitch Storm": {
-            "syncwobble_enabled": True, "syncwobble_amount": 90, "syncwobble_freq": 16,
-            "syncdropout_enabled": True, "syncdropout_prob": 40, "syncdropout_duration": 10,
-            "scanline_enabled": True, "scanline_freq": 50, "scanline_intensity": 100,
-            "phasemod_enabled": True, "phasemod_depth": 75, "phasemod_rate": 9,
-            "bitcrush_enabled": True, "bitcrush_bits": 1, "bitcrush_rate": 2200,
-            "noise_enabled": True, "noise_amount": 80, "noise_type": "Crackle",
         },
     }
 

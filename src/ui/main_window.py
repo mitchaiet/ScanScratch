@@ -48,79 +48,137 @@ class StreamingTransmissionWorker(QThread):
 
     def run(self):
         """Run streaming transmission with live audio and progressive A/B decode."""
-        import sounddevice as sd
-        from ..sstv import SSTVEncoder
-        from ..sstv.streaming_decoder import StreamingDecoder
-        from ..effects import EffectsPipeline
-
+        print("=== WORKER THREAD STARTED ===", flush=True)
         try:
+            import sounddevice as sd
+            print("✓ sounddevice imported", flush=True)
+            from src.sstv import SSTVEncoder
+            print("✓ SSTVEncoder imported", flush=True)
+            from src.sstv.streaming_decoder import StreamingDecoder
+            print("✓ StreamingDecoder imported", flush=True)
+            from src.effects import EffectsPipeline
+            print("✓ EffectsPipeline imported", flush=True)
+
             # Emit immediately to show we've started
+            print("Emitting progress 1", flush=True)
             self.progress.emit(1)
             self.status_message.emit("Initializing transmission...")
 
             mode = self.settings.get("sstv_mode", "MartinM1")
+            print(f"Mode: {mode}", flush=True)
 
             # Step 1: Encode image to SSTV audio (with aspect ratio preservation)
+            print("Starting encoding...", flush=True)
             self.status_message.emit(f"Encoding image to {mode} SSTV signal...")
             self.progress.emit(5)
             encoder = SSTVEncoder()
+            print("Encoder created, calling encode()...", flush=True)
             clean_audio, sample_rate = encoder.encode(self.source_image, mode=mode, preserve_aspect=True)
+            print(f"✓ Encoding complete: {len(clean_audio)} samples at {sample_rate} Hz", flush=True)
             crop_box = encoder.get_crop_box()
             self.encoding_done.emit(crop_box)
             self.progress.emit(10)
 
             # Step 2: Apply audio effects to create affected version
+            print("Applying effects...", flush=True)
             self.status_message.emit("Applying audio effects...")
             self.progress.emit(12)
             pipeline = EffectsPipeline(sample_rate)
             pipeline.configure(self.settings)
             affected_audio = pipeline.process(clean_audio)
+            print(f"✓ Effects applied", flush=True)
             self.progress.emit(15)
 
             # Send affected audio to visualizer and playback
+            print("Sending audio to visualizer...", flush=True)
             self.status_message.emit("Starting transmission playback...")
             self.audio_ready.emit(affected_audio, sample_rate)
+            print("✓ Audio sent to visualizer", flush=True)
 
             # Step 3: Set up streaming decoder for affected version
+            print("Creating StreamingDecoder...", flush=True)
             decoder_affected = StreamingDecoder(sample_rate, mode)
             total_lines = decoder_affected.height
             header_duration = decoder_affected.get_header_duration()
             line_duration = decoder_affected.get_line_duration()
+            print(f"✓ Decoder ready: {total_lines} lines, {header_duration:.2f}s header, {line_duration:.3f}s/line", flush=True)
 
             # Step 4: Start audio playback (only affected audio is played)
+            print("Starting audio playback...", flush=True)
             self.status_message.emit(f"Transmitting {total_lines} scanlines...")
-            sd.play(affected_audio, sample_rate)
+            try:
+                print(f"  Calling sd.play with {len(affected_audio)} samples at {sample_rate}Hz...", flush=True)
+                sd.play(affected_audio, sample_rate)
+                print("✓ sd.play() returned successfully", flush=True)
+            except Exception as e:
+                print(f"!!! ERROR in sd.play: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
+                raise
 
             # Step 5: Decode affected version live, sync with audio playback
+            print("Starting progressive decode...", flush=True)
+            import time
             start_time = time.time()
 
-            for line_num, rgb_line in decoder_affected.decode_progressive(affected_audio):
-                if self._stop_requested:
-                    sd.stop()
-                    break
+            line_count = 0
+            print(f"About to enter decode_progressive loop...", flush=True)
 
-                # Calculate when this line should appear based on audio timing
-                target_time = header_duration + (line_num + 1) * line_duration
-                elapsed = time.time() - start_time
+            try:
+                for line_num, rgb_line in decoder_affected.decode_progressive(affected_audio):
+                    if line_count == 0:
+                        print(f"✓ First line decoded! line_num={line_num}, rgb_line.shape={rgb_line.shape}", flush=True)
+                    line_count += 1
 
-                # Wait for audio to catch up
-                if elapsed < target_time:
-                    sleep_time = target_time - elapsed
-                    while sleep_time > 0 and not self._stop_requested:
-                        time.sleep(min(0.05, sleep_time))
-                        sleep_time -= 0.05
+                    if line_count % 10 == 0:
+                        print(f"  Line {line_count}/256 decoded...", flush=True)
 
-                # Emit the decoded line
-                self.line_decoded.emit(line_num, rgb_line)
+                    if self._stop_requested:
+                        print("Stop requested, breaking...", flush=True)
+                        sd.stop()
+                        break
 
-                # Update progress and status (15% to 85% during affected decode)
-                progress = 15 + int((line_num / total_lines) * 70)
-                self.progress.emit(progress)
+                    # Calculate when this line should appear based on audio timing
+                    target_time = header_duration + (line_num + 1) * line_duration
+                    elapsed = time.time() - start_time
 
-                # Update status every 32 lines
-                if line_num % 32 == 0:
-                    percent_complete = int((line_num / total_lines) * 100)
-                    self.status_message.emit(f"Decoding: {percent_complete}% ({line_num}/{total_lines} lines)")
+                    # Wait for audio to catch up
+                    if elapsed < target_time:
+                        sleep_time = target_time - elapsed
+                        while sleep_time > 0 and not self._stop_requested:
+                            time.sleep(min(0.05, sleep_time))
+                            sleep_time -= 0.05
+
+                    try:
+                        # Emit the decoded line
+                        self.line_decoded.emit(line_num, rgb_line)
+                    except Exception as e:
+                        print(f"!!! ERROR emitting line_decoded signal: {e}", flush=True)
+                        raise
+
+                    try:
+                        # Update progress and status (15% to 85% during affected decode)
+                        progress = 15 + int((line_num / total_lines) * 70)
+                        self.progress.emit(progress)
+                    except Exception as e:
+                        print(f"!!! ERROR emitting progress: {e}", flush=True)
+                        raise
+
+                    # Update status every 32 lines
+                    if line_num % 32 == 0:
+                        try:
+                            percent_complete = int((line_num / total_lines) * 100)
+                            self.status_message.emit(f"Decoding: {percent_complete}% ({line_num}/{total_lines} lines)")
+                        except Exception as e:
+                            print(f"!!! ERROR emitting status message: {e}", flush=True)
+                            raise
+
+                print(f"✓ Affected decode loop complete: {line_count} lines", flush=True)
+            except Exception as e:
+                print(f"\n!!! EXCEPTION IN DECODE LOOP: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
+                raise
 
             # Wait for audio to finish
             if not self._stop_requested:
@@ -147,8 +205,12 @@ class StreamingTransmissionWorker(QThread):
             self.finished.emit()
 
         except Exception as e:
+            print(f"\n=== WORKER THREAD ERROR ===", flush=True)
+            print(f"Error type: {type(e).__name__}", flush=True)
+            print(f"Error message: {str(e)}", flush=True)
             import traceback
             traceback.print_exc()
+            print("=== END ERROR ===\n", flush=True)
             self.error.emit(str(e))
             self.finished.emit()
 
@@ -322,13 +384,6 @@ class MainWindow(QMainWindow):
         self.open_btn.setToolTip("Open Image (Ctrl+O)")
         self.open_btn.clicked.connect(self._on_open_file)
         header_layout.addWidget(self.open_btn)
-
-        self.transmit_btn = QPushButton("TRANSMIT")
-        self.transmit_btn.setObjectName("headerTransmitButton")
-        self.transmit_btn.setToolTip("Encode, corrupt, and decode image")
-        self.transmit_btn.setEnabled(False)
-        self.transmit_btn.clicked.connect(self._on_transmit)
-        header_layout.addWidget(self.transmit_btn)
 
         self.export_btn = QPushButton("Export")
         self.export_btn.setObjectName("headerButton")
@@ -544,55 +599,84 @@ to create unique visual artifacts.</p>
     def _on_source_loaded(self):
         """Handle source image loaded."""
         self.params_panel.set_transmit_enabled(True)
-        self.transmit_btn.setEnabled(True)
         self._update_status_bar()
         self.status_label.setText("Image loaded - ready to transmit")
 
     def _on_transmit(self):
         """Handle transmit button click."""
-        source_image = self.source_viewer.get_image()
-        if source_image is None:
+        print("\n=== TRANSMIT BUTTON CLICKED ===", flush=True)
+        try:
+            source_image = self.source_viewer.get_image()
+            if source_image is None:
+                print("No source image loaded", flush=True)
+                return
+
+            print(f"Source image: {source_image.size}", flush=True)
+
+            # Stop any existing transmission
+            if self._worker is not None and self._worker.isRunning():
+                print("Stopping existing worker...", flush=True)
+                self._worker.stop()
+                self._worker.wait()
+
+            # Get settings and determine output size
+            print("Getting effect settings...", flush=True)
+            effect_settings = self.params_panel.get_effect_settings()
+            mode = effect_settings.get("sstv_mode", "MartinM1")
+            print(f"Mode: {mode}", flush=True)
+
+            # Get dimensions for this mode
+            print("Getting mode dimensions...", flush=True)
+            from src.sstv.streaming_decoder import MODE_SPECS
+            spec = MODE_SPECS.get(mode, MODE_SPECS["MartinM1"])
+            width, height = spec["width"], spec["height"]
+            print(f"Output dimensions: {width}x{height}", flush=True)
+
+            # Initialize blank output images (full frame) for both versions
+            print("Initializing output buffers...", flush=True)
+            self._output_image_data = np.zeros((height, width, 3), dtype=np.uint8)
+            self._clean_image_data = np.zeros((height, width, 3), dtype=np.uint8)
+            self._crop_box = None
+            self._showing_clean = False
+            self._update_output_display()
+            print("✓ Output buffers initialized", flush=True)
+
+            # Disable transmit during processing
+            print("Disabling UI controls...", flush=True)
+            self.params_panel.set_transmit_enabled(False)
+            self.params_panel.set_progress(0)
+            self.status_label.setText("Transmitting...")
+            self.export_action.setEnabled(False)
+            self.copy_action.setEnabled(False)
+            print("✓ UI controls disabled", flush=True)
+        except Exception as e:
+            print(f"\n!!! ERROR IN _on_transmit SETUP: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
             return
 
-        # Stop any existing transmission
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.stop()
-            self._worker.wait()
-
-        # Get settings and determine output size
-        effect_settings = self.params_panel.get_effect_settings()
-        mode = effect_settings.get("sstv_mode", "MartinM1")
-
-        # Get dimensions for this mode
-        from ..sstv.streaming_decoder import MODE_SPECS
-        spec = MODE_SPECS.get(mode, MODE_SPECS["MartinM1"])
-        width, height = spec["width"], spec["height"]
-
-        # Initialize blank output images (full frame) for both versions
-        self._output_image_data = np.zeros((height, width, 3), dtype=np.uint8)
-        self._clean_image_data = np.zeros((height, width, 3), dtype=np.uint8)
-        self._crop_box = None
-        self._showing_clean = False
-        self._update_output_display()
-
-        # Disable transmit during processing
-        self.params_panel.set_transmit_enabled(False)
-        self.params_panel.set_progress(0)
-        self.status_label.setText("Transmitting...")
-        self.export_action.setEnabled(False)
-        self.copy_action.setEnabled(False)
-
         # Create and start worker
-        self._worker = StreamingTransmissionWorker(source_image, effect_settings)
-        self._worker.progress.connect(self._on_progress)
-        self._worker.status_message.connect(self._on_status_message)
-        self._worker.encoding_done.connect(self._on_encoding_done)
-        self._worker.audio_ready.connect(self._on_audio_ready)
-        self._worker.line_decoded.connect(self._on_line_decoded)
-        self._worker.clean_line_decoded.connect(self._on_clean_line_decoded)
-        self._worker.finished.connect(self._on_transmission_finished)
-        self._worker.error.connect(self._on_transmission_error)
-        self._worker.start()
+        try:
+            print("Creating worker thread...", flush=True)
+            self._worker = StreamingTransmissionWorker(source_image, effect_settings)
+            print("Connecting worker signals...", flush=True)
+            self._worker.progress.connect(self._on_progress)
+            self._worker.status_message.connect(self._on_status_message)
+            self._worker.encoding_done.connect(self._on_encoding_done)
+            self._worker.audio_ready.connect(self._on_audio_ready)
+            self._worker.line_decoded.connect(self._on_line_decoded)
+            self._worker.clean_line_decoded.connect(self._on_clean_line_decoded)
+            self._worker.finished.connect(self._on_transmission_finished)
+            self._worker.error.connect(self._on_transmission_error)
+            print("Starting worker thread...", flush=True)
+            self._worker.start()
+            print("✓ Worker thread started successfully", flush=True)
+        except Exception as e:
+            print(f"\n!!! ERROR CREATING/STARTING WORKER: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            self.params_panel.set_transmit_enabled(True)
+            self.status_label.setText(f"Error: {e}")
 
     def _on_progress(self, value: int):
         """Handle progress update."""
@@ -608,19 +692,56 @@ to create unique visual artifacts.</p>
 
     def _on_audio_ready(self, audio_data, sample_rate):
         """Set up audio visualizer with the processed audio."""
-        self.params_panel.set_audio_data(audio_data, sample_rate)
+        try:
+            print(f">>> _on_audio_ready CALLED: audio_data.shape={audio_data.shape}, sample_rate={sample_rate}", flush=True)
+            self.params_panel.set_audio_data(audio_data, sample_rate)
+            print(f"✓ Audio data sent to params panel", flush=True)
+        except Exception as e:
+            print(f"!!! ERROR in _on_audio_ready: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            raise
 
     def _on_line_decoded(self, line_num: int, rgb_line: np.ndarray):
         """Handle a decoded line from affected stream - update the output image."""
-        if self._output_image_data is not None and line_num < len(self._output_image_data):
-            self._output_image_data[line_num] = rgb_line
-            if not self._showing_clean:
-                self._update_output_display()
+        try:
+            if line_num == 0:
+                print(f">>> _on_line_decoded HANDLER CALLED: line_num={line_num}, rgb_line.shape={rgb_line.shape}", flush=True)
+                print(f"    _output_image_data.shape={self._output_image_data.shape if self._output_image_data is not None else None}", flush=True)
+                print(f"    _showing_clean={self._showing_clean}", flush=True)
+
+            if self._output_image_data is not None and line_num < len(self._output_image_data):
+                try:
+                    self._output_image_data[line_num] = rgb_line
+                    if line_num == 0:
+                        print(f"    Line {line_num} written to buffer", flush=True)
+                except Exception as e:
+                    print(f"!!! ERROR writing line to buffer: {e}", flush=True)
+                    raise
+
+                if not self._showing_clean:
+                    if line_num == 0:
+                        print(f"    About to call _update_output_display()...", flush=True)
+                        print("Calling _update_output_display()...", flush=True)
+                    self._update_output_display()
+                    if line_num == 0:
+                        print("✓ _update_output_display() completed", flush=True)
+        except Exception as e:
+            print(f"!!! CRASH in _on_line_decoded at line {line_num}: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            raise
 
     def _on_clean_line_decoded(self, line_num: int, rgb_line: np.ndarray):
         """Handle a decoded line from clean stream - update the clean image."""
-        if self._clean_image_data is not None and line_num < len(self._clean_image_data):
-            self._clean_image_data[line_num] = rgb_line
+        try:
+            if self._clean_image_data is not None and line_num < len(self._clean_image_data):
+                self._clean_image_data[line_num] = rgb_line
+        except Exception as e:
+            print(f"!!! CRASH in _on_clean_line_decoded: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            raise
             if self._showing_clean:
                 self._update_output_display()
 
@@ -631,29 +752,49 @@ to create unique visual artifacts.</p>
 
     def _update_output_display(self):
         """Update the output viewer with current image data (clean or affected)."""
-        # Choose which version to display based on A/B toggle state
-        image_data = self._clean_image_data if self._showing_clean else self._output_image_data
+        try:
+            # Choose which version to display based on A/B toggle state
+            image_data = self._clean_image_data if self._showing_clean else self._output_image_data
 
-        if image_data is not None:
-            img = Image.fromarray(image_data, mode='RGB')
+            if image_data is not None:
+                try:
+                    img = Image.fromarray(image_data, mode='RGB')
+                except Exception as e:
+                    print(f"!!! ERROR in Image.fromarray: {e}", flush=True)
+                    print(f"    image_data.shape={image_data.shape}, dtype={image_data.dtype}", flush=True)
+                    raise
 
-            # Crop to remove letterbox/pillarbox if we have crop info
-            if self._crop_box is not None:
-                left, top, right, bottom = self._crop_box
-                # Make sure crop box is within bounds
-                left = max(0, left)
-                top = max(0, top)
-                right = min(img.width, right)
-                bottom = min(img.height, bottom)
-                if right > left and bottom > top:
-                    img = img.crop((left, top, right, bottom))
+                # Crop to remove letterbox/pillarbox if we have crop info
+                if self._crop_box is not None:
+                    try:
+                        left, top, right, bottom = self._crop_box
+                        # Make sure crop box is within bounds
+                        left = max(0, left)
+                        top = max(0, top)
+                        right = min(img.width, right)
+                        bottom = min(img.height, bottom)
+                        if right > left and bottom > top:
+                            img = img.crop((left, top, right, bottom))
+                    except Exception as e:
+                        print(f"!!! ERROR in cropping: {e}", flush=True)
+                        raise
 
-            self.output_viewer.set_image(img)
+                try:
+                    self.output_viewer.set_image(img)
+                except Exception as e:
+                    print(f"!!! ERROR in output_viewer.set_image: {e}", flush=True)
+                    import traceback
+                    traceback.print_exc()
+                    raise
+        except Exception as e:
+            print(f"!!! CRASH in _update_output_display: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            raise
 
     def _on_transmission_finished(self):
         """Handle transmission complete."""
         self.params_panel.set_transmit_enabled(True)
-        self.transmit_btn.setEnabled(True)
         self.params_panel.stop_audio_visualization()
         self.export_action.setEnabled(True)
         self.export_btn.setEnabled(True)
@@ -668,8 +809,11 @@ to create unique visual artifacts.</p>
 
     def _on_transmission_error(self, error_msg: str):
         """Handle transmission error."""
-        print(f"Transmission error: {error_msg}")
+        print(f"Transmission error: {error_msg}", flush=True)
+        import traceback
+        traceback.print_exc()
         self.params_panel.set_transmit_enabled(True)
+        self.status_label.setText(f"Error: {error_msg}")
 
     def closeEvent(self, event):
         """Handle window close - stop any running transmission."""
