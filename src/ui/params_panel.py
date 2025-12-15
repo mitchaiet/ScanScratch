@@ -14,13 +14,202 @@ from PyQt6.QtWidgets import (
     QSpacerItem,
     QSizePolicy,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPointF
+from PyQt6.QtGui import QPainter, QPen, QColor, QConicalGradient, QBrush
 import numpy as np
+import math
 
 from .audio_visualizer import AudioVisualizer
 
 
-class EffectSlider(QWidget):
+class Knob(QWidget):
+    """A rotary knob control for audio parameters."""
+
+    value_changed = pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._value = 0
+        self._minimum = 0
+        self._maximum = 100
+        self._is_dragging = False
+        self._last_y = 0
+
+        self.setFixedSize(50, 50)
+        self.setMouseTracking(True)
+
+    def value(self) -> int:
+        return self._value
+
+    def setValue(self, val: int):
+        val = max(self._minimum, min(self._maximum, val))
+        if val != self._value:
+            self._value = val
+            self.update()
+            self.value_changed.emit(val)
+
+    def setRange(self, minimum: int, maximum: int):
+        self._minimum = minimum
+        self._maximum = maximum
+        self._value = max(minimum, min(maximum, self._value))
+        self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._is_dragging = True
+            self._last_y = event.pos().y()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._is_dragging:
+            delta = self._last_y - event.pos().y()
+            self._last_y = event.pos().y()
+
+            # Scale sensitivity
+            step = delta * 0.5
+            new_value = self._value + step
+            self.setValue(int(new_value))
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._is_dragging = False
+            event.accept()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Calculate dimensions
+        width = self.width()
+        height = self.height()
+        size = min(width, height) - 4
+        x = (width - size) // 2
+        y = (height - size) // 2
+
+        # Calculate angle (-135° to +135° = 270° range)
+        normalized = (self._value - self._minimum) / (self._maximum - self._minimum)
+        angle = -135 + (normalized * 270)
+
+        # Draw outer ring (track)
+        painter.setPen(QPen(QColor(60, 60, 60), 3))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(x, y, size, size)
+
+        # Draw value arc
+        gradient = QConicalGradient(width / 2, height / 2, -135)
+        gradient.setColorAt(0.0, QColor(90, 138, 90))
+        gradient.setColorAt(normalized, QColor(90, 138, 90))
+        gradient.setColorAt(normalized + 0.01, QColor(60, 60, 60))
+        gradient.setColorAt(1.0, QColor(60, 60, 60))
+
+        painter.setPen(QPen(QBrush(gradient), 3))
+        painter.drawArc(x, y, size, size, -45 * 16, -270 * 16)
+
+        # Draw center circle
+        center_size = size * 0.6
+        center_x = x + (size - center_size) // 2
+        center_y = y + (size - center_size) // 2
+
+        painter.setBrush(QColor(42, 42, 42))
+        painter.setPen(QPen(QColor(30, 30, 30), 2))
+        painter.drawEllipse(int(center_x), int(center_y), int(center_size), int(center_size))
+
+        # Draw indicator line
+        angle_rad = math.radians(angle)
+        line_start_radius = center_size * 0.25
+        line_end_radius = center_size * 0.45
+
+        center_point = QPointF(width / 2, height / 2)
+        start_point = QPointF(
+            center_point.x() + line_start_radius * math.sin(angle_rad),
+            center_point.y() - line_start_radius * math.cos(angle_rad)
+        )
+        end_point = QPointF(
+            center_point.x() + line_end_radius * math.sin(angle_rad),
+            center_point.y() - line_end_radius * math.cos(angle_rad)
+        )
+
+        painter.setPen(QPen(QColor(200, 200, 200), 2, Qt.PenStyle.SolidLine))
+        painter.drawLine(start_point, end_point)
+
+
+class EffectKnob(QWidget):
+    """A labeled knob for effect parameters."""
+
+    value_changed = pyqtSignal(float)
+
+    def __init__(
+        self,
+        label: str,
+        min_val: float,
+        max_val: float,
+        default: float,
+        suffix: str = "",
+        decimals: int = 0,
+        tooltip: str = "",
+    ):
+        super().__init__()
+        self._min = min_val
+        self._max = max_val
+        self._decimals = decimals
+        self._suffix = suffix
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(4)
+
+        # Label above knob
+        self.label = QLabel(label)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if tooltip:
+            self.label.setToolTip(tooltip)
+            self.setToolTip(tooltip)
+        layout.addWidget(self.label)
+
+        # Knob in center
+        self.knob = Knob()
+        self.knob.setRange(0, 100)
+        self.knob.setValue(self._value_to_knob(default))
+        self.knob.value_changed.connect(self._on_knob_changed)
+        knob_container = QHBoxLayout()
+        knob_container.addStretch()
+        knob_container.addWidget(self.knob)
+        knob_container.addStretch()
+        layout.addLayout(knob_container)
+
+        # Value display below
+        self.value_label = QLabel()
+        self.value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._update_value_label(default)
+        layout.addWidget(self.value_label)
+
+    def _value_to_knob(self, val: float) -> int:
+        return int((val - self._min) / (self._max - self._min) * 100)
+
+    def _knob_to_value(self, knob_val: int) -> float:
+        return self._min + (knob_val / 100) * (self._max - self._min)
+
+    def _on_knob_changed(self, knob_val: int):
+        value = self._knob_to_value(knob_val)
+        self._update_value_label(value)
+        self.value_changed.emit(value)
+
+    def _update_value_label(self, value: float):
+        if self._decimals == 0:
+            text = f"{int(value)}{self._suffix}"
+        else:
+            text = f"{value:.{self._decimals}f}{self._suffix}"
+        self.value_label.setText(text)
+
+    def value(self) -> float:
+        return self._knob_to_value(self.knob.value())
+
+    def set_value(self, val: float):
+        self.knob.setValue(self._value_to_knob(val))
+
+
+class EffectKnob(QWidget):
     """A labeled slider for effect parameters."""
 
     value_changed = pyqtSignal(float)
@@ -112,11 +301,11 @@ class EffectGroup(QGroupBox):
         header.addStretch()
         self._layout.addLayout(header)
 
-        # Content widget
+        # Content widget - horizontal layout for knobs
         self.content = QWidget()
-        self.content_layout = QVBoxLayout(self.content)
+        self.content_layout = QHBoxLayout(self.content)
         self.content_layout.setContentsMargins(0, 4, 0, 0)
-        self.content_layout.setSpacing(4)
+        self.content_layout.setSpacing(8)
         self._layout.addWidget(self.content)
 
         self._on_enabled_changed(enabled)
@@ -281,67 +470,67 @@ class ParamsPanel(QWidget):
 
         # Phase Modulation Effect - horizontal scanline displacement
         self.phasemod_group = EffectGroup("Phase Modulation", enabled=False)
-        self.phasemod_depth = EffectSlider("Depth", 0, 100, 50, "%",
+        self.phasemod_depth = EffectKnob("Depth", 0, 100, 50, "%",
             tooltip="How far to displace scanlines horizontally")
         self.phasemod_group.add_widget(self.phasemod_depth)
-        self.phasemod_rate = EffectSlider("Rate", 0.5, 20, 8, " Hz", decimals=1,
+        self.phasemod_rate = EffectKnob("Rate", 0.5, 20, 8, " Hz", decimals=1,
             tooltip="Speed of horizontal displacement modulation")
         self.phasemod_group.add_widget(self.phasemod_rate)
         scroll_layout.addWidget(self.phasemod_group)
 
         # Amplitude Modulation Effect - brightness chaos
         self.ampmod_group = EffectGroup("Amplitude Modulation", enabled=False)
-        self.ampmod_depth = EffectSlider("Depth", 0, 100, 50, "%",
+        self.ampmod_depth = EffectKnob("Depth", 0, 100, 50, "%",
             tooltip="Intensity of brightness/color modulation")
         self.ampmod_group.add_widget(self.ampmod_depth)
-        self.ampmod_rate = EffectSlider("Rate", 1, 25, 12, " Hz", decimals=1,
+        self.ampmod_rate = EffectKnob("Rate", 1, 25, 12, " Hz", decimals=1,
             tooltip="Speed of amplitude modulation")
         self.ampmod_group.add_widget(self.ampmod_rate)
         scroll_layout.addWidget(self.ampmod_group)
 
         # Scanline Corruption Effect - random scanline artifacts
         self.scanline_group = EffectGroup("Scanline Corruption", enabled=False)
-        self.scanline_freq = EffectSlider("Frequency", 0, 100, 15, "%",
+        self.scanline_freq = EffectKnob("Frequency", 0, 100, 15, "%",
             tooltip="How many scanlines to corrupt")
         self.scanline_group.add_widget(self.scanline_freq)
-        self.scanline_intensity = EffectSlider("Intensity", 0, 100, 70, "%",
+        self.scanline_intensity = EffectKnob("Intensity", 0, 100, 70, "%",
             tooltip="Severity of corruption artifacts")
         self.scanline_group.add_widget(self.scanline_intensity)
         scroll_layout.addWidget(self.scanline_group)
 
         # Harmonic Distortion Effect - frequency artifacts
         self.harmonic_group = EffectGroup("Harmonic Distortion", enabled=False)
-        self.harmonic_amount = EffectSlider("Amount", 0, 100, 50, "%",
+        self.harmonic_amount = EffectKnob("Amount", 0, 100, 50, "%",
             tooltip="Amount of harmonic overtones to add")
         self.harmonic_group.add_widget(self.harmonic_amount)
-        self.harmonic_count = EffectSlider("Harmonics", 1, 5, 3, "",
+        self.harmonic_count = EffectKnob("Harmonics", 1, 5, 3, "",
             tooltip="Number of harmonic overtones (1-5)")
         self.harmonic_group.add_widget(self.harmonic_count)
         scroll_layout.addWidget(self.harmonic_group)
 
         # Sync Wobble Effect - causes scanline displacement
         self.syncwobble_group = EffectGroup("Sync Wobble", enabled=False)
-        self.syncwobble_amount = EffectSlider("Amount", 0, 100, 50, "%",
+        self.syncwobble_amount = EffectKnob("Amount", 0, 100, 50, "%",
             tooltip="Intensity of horizontal scanline wobble")
         self.syncwobble_group.add_widget(self.syncwobble_amount)
-        self.syncwobble_freq = EffectSlider("Speed", 0.5, 20, 5, " Hz", decimals=1,
+        self.syncwobble_freq = EffectKnob("Speed", 0.5, 20, 5, " Hz", decimals=1,
             tooltip="How fast the wobble oscillates")
         self.syncwobble_group.add_widget(self.syncwobble_freq)
         scroll_layout.addWidget(self.syncwobble_group)
 
         # Sync Dropout Effect - random line corruption
         self.syncdropout_group = EffectGroup("Sync Dropout", enabled=False)
-        self.syncdropout_prob = EffectSlider("Frequency", 0, 100, 15, "%",
+        self.syncdropout_prob = EffectKnob("Frequency", 0, 100, 15, "%",
             tooltip="How often sync dropouts occur")
         self.syncdropout_group.add_widget(self.syncdropout_prob)
-        self.syncdropout_duration = EffectSlider("Duration", 1, 20, 5, " ms",
+        self.syncdropout_duration = EffectKnob("Duration", 1, 20, 5, " ms",
             tooltip="Length of each dropout")
         self.syncdropout_group.add_widget(self.syncdropout_duration)
         scroll_layout.addWidget(self.syncdropout_group)
 
         # Noise Effect - improved defaults for more impact
         self.noise_group = EffectGroup("Noise", enabled=False)
-        self.noise_amount = EffectSlider("Amount", 0, 100, 35, "%",
+        self.noise_amount = EffectKnob("Amount", 0, 100, 35, "%",
             tooltip="Volume of noise added to the signal")
         self.noise_group.add_widget(self.noise_amount)
 
@@ -360,57 +549,57 @@ class ParamsPanel(QWidget):
 
         # Distortion Effect - more aggressive defaults
         self.distortion_group = EffectGroup("Distortion", enabled=False)
-        self.distortion_drive = EffectSlider("Drive", 0, 100, 50, "%",
+        self.distortion_drive = EffectKnob("Drive", 0, 100, 50, "%",
             tooltip="Amount of gain applied before clipping")
         self.distortion_group.add_widget(self.distortion_drive)
-        self.distortion_clip = EffectSlider("Clip", 0, 100, 60, "%",
+        self.distortion_clip = EffectKnob("Clip", 0, 100, 60, "%",
             tooltip="Clipping threshold - lower = harsher distortion")
         self.distortion_group.add_widget(self.distortion_clip)
         scroll_layout.addWidget(self.distortion_group)
 
         # Bitcrush Effect - lower defaults for more glitch
         self.bitcrush_group = EffectGroup("Bitcrush", enabled=False)
-        self.bitcrush_bits = EffectSlider("Bit Depth", 1, 16, 5, " bits",
+        self.bitcrush_bits = EffectKnob("Bit Depth", 1, 16, 5, " bits",
             tooltip="Audio bit depth - lower = more digital degradation")
         self.bitcrush_group.add_widget(self.bitcrush_bits)
-        self.bitcrush_rate = EffectSlider("Sample Rate", 1000, 44100, 11025, " Hz",
+        self.bitcrush_rate = EffectKnob("Sample Rate", 1000, 44100, 11025, " Hz",
             tooltip="Target sample rate - lower = more lo-fi")
         self.bitcrush_group.add_widget(self.bitcrush_rate)
         scroll_layout.addWidget(self.bitcrush_group)
 
         # Frequency Shift Effect - wider range
         self.freqshift_group = EffectGroup("Frequency Shift", enabled=False)
-        self.freqshift_hz = EffectSlider("Shift", -500, 500, 100, " Hz",
+        self.freqshift_hz = EffectKnob("Shift", -500, 500, 100, " Hz",
             tooltip="Shift all frequencies up/down - creates color distortion")
         self.freqshift_group.add_widget(self.freqshift_hz)
         scroll_layout.addWidget(self.freqshift_group)
 
         # Bandpass Filter
         self.bandpass_group = EffectGroup("Bandpass Filter", enabled=False)
-        self.bandpass_low = EffectSlider("Low Cut", 100, 2000, 500, " Hz",
+        self.bandpass_low = EffectKnob("Low Cut", 100, 2000, 500, " Hz",
             tooltip="Remove frequencies below this value")
         self.bandpass_group.add_widget(self.bandpass_low)
-        self.bandpass_high = EffectSlider("High Cut", 1000, 10000, 2500, " Hz",
+        self.bandpass_high = EffectKnob("High Cut", 1000, 10000, 2500, " Hz",
             tooltip="Remove frequencies above this value")
         self.bandpass_group.add_widget(self.bandpass_high)
         scroll_layout.addWidget(self.bandpass_group)
 
         # Delay Effect - more feedback for drama
         self.delay_group = EffectGroup("Delay / Echo", enabled=False)
-        self.delay_time = EffectSlider("Time", 3, 500, 60, " ms",
+        self.delay_time = EffectKnob("Time", 3, 500, 60, " ms",
             tooltip="Time between echoes")
         self.delay_group.add_widget(self.delay_time)
-        self.delay_feedback = EffectSlider("Feedback", 0, 90, 65, "%",
+        self.delay_feedback = EffectKnob("Feedback", 0, 90, 65, "%",
             tooltip="Amount of signal fed back - higher = more repeats")
         self.delay_group.add_widget(self.delay_feedback)
-        self.delay_mix = EffectSlider("Mix", 0, 100, 45, "%",
+        self.delay_mix = EffectKnob("Mix", 0, 100, 45, "%",
             tooltip="Blend between original and delayed signal")
         self.delay_group.add_widget(self.delay_mix)
         scroll_layout.addWidget(self.delay_group)
 
         # Time Stretch Effect - wider range
         self.timestretch_group = EffectGroup("Time Stretch", enabled=False)
-        self.timestretch_rate = EffectSlider("Rate", 0.5, 2.5, 1.0, "x", decimals=2,
+        self.timestretch_rate = EffectKnob("Rate", 0.5, 2.5, 1.0, "x", decimals=2,
             tooltip="Playback speed - also changes pitch")
         self.timestretch_group.add_widget(self.timestretch_rate)
         scroll_layout.addWidget(self.timestretch_group)

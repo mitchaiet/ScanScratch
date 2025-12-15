@@ -190,7 +190,12 @@ class ExportDialog(QDialog):
 
         layout.addLayout(button_layout)
 
+        # Set defaults
         self._on_format_changed("PNG")
+
+        # Default to high-resolution export (upscale from SSTV resolution)
+        # Square 2048x2048 provides excellent quality for sharing/printing
+        self.preset_combo.setCurrentText("Square 2048x2048")
 
     def _on_format_changed(self, format_name: str):
         """Update UI based on selected format."""
