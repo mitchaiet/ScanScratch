@@ -9,13 +9,14 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QGroupBox,
     QMessageBox,
+    QComboBox,
 )
 from PIL import Image
 from pathlib import Path
 
 
 class ExportDialog(QDialog):
-    """Simple export dialog for SSTV images - PNG only at native resolution."""
+    """Simple export dialog for SSTV images - PNG only with optional upscaling."""
 
     def __init__(self, output_image: Image.Image, parent=None):
         super().__init__(parent)
@@ -38,10 +39,28 @@ class ExportDialog(QDialog):
 
         if self.output_image:
             width, height = self.output_image.size
-            info_layout.addWidget(QLabel(f"Resolution: {width} × {height} px"))
+            info_layout.addWidget(QLabel(f"Native Resolution: {width} × {height} px"))
             info_layout.addWidget(QLabel(f"Format: PNG (lossless)"))
 
         layout.addWidget(info_group)
+
+        # Scale options
+        scale_group = QGroupBox("Export Size")
+        scale_layout = QVBoxLayout(scale_group)
+
+        scale_row = QHBoxLayout()
+        scale_row.addWidget(QLabel("Scale:"))
+        self.scale_combo = QComboBox()
+        if self.output_image:
+            width, height = self.output_image.size
+            self.scale_combo.addItem(f"1× ({width} × {height} px)", 1)
+            self.scale_combo.addItem(f"2× ({width*2} × {height*2} px)", 2)
+            self.scale_combo.addItem(f"4× ({width*4} × {height*4} px)", 4)
+        self.scale_combo.setCurrentIndex(0)
+        scale_row.addWidget(self.scale_combo, stretch=1)
+        scale_layout.addLayout(scale_row)
+
+        layout.addWidget(scale_group)
 
         # Buttons
         button_layout = QHBoxLayout()
@@ -64,6 +83,9 @@ class ExportDialog(QDialog):
             QMessageBox.warning(self, "No Image", "No image to export.")
             return
 
+        # Get scale factor
+        scale = self.scale_combo.currentData()
+
         # Show save dialog
         default_name = "sstv_output.png"
         file_path, _ = QFileDialog.getSaveFileName(
@@ -80,9 +102,20 @@ class ExportDialog(QDialog):
         if not file_path.lower().endswith('.png'):
             file_path += '.png'
 
-        # Save as PNG at native resolution
+        # Save as PNG with optional upscaling
         try:
-            self.output_image.save(file_path, format='PNG')
+            if scale > 1:
+                # Upscale using nearest-neighbor (preserves pixel art look)
+                width, height = self.output_image.size
+                scaled_image = self.output_image.resize(
+                    (width * scale, height * scale),
+                    Image.Resampling.NEAREST
+                )
+                scaled_image.save(file_path, format='PNG')
+            else:
+                # Save at native resolution
+                self.output_image.save(file_path, format='PNG')
+
             self.export_path = file_path
             self.accept()
 
