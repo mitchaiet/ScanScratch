@@ -5,7 +5,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
-    QSlider,
     QComboBox,
     QCheckBox,
     QGroupBox,
@@ -207,78 +206,6 @@ class EffectKnob(QWidget):
 
     def set_value(self, val: float):
         self.knob.setValue(self._value_to_knob(val))
-
-
-class EffectKnob(QWidget):
-    """A labeled slider for effect parameters."""
-
-    value_changed = pyqtSignal(float)
-
-    def __init__(
-        self,
-        label: str,
-        min_val: float,
-        max_val: float,
-        default: float,
-        suffix: str = "",
-        decimals: int = 0,
-        tooltip: str = "",
-    ):
-        super().__init__()
-        self._min = min_val
-        self._max = max_val
-        self._decimals = decimals
-        self._suffix = suffix
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
-        layout.setSpacing(8)
-
-        # Label
-        self.label = QLabel(label)
-        self.label.setFixedWidth(100)
-        if tooltip:
-            self.label.setToolTip(tooltip)
-            self.setToolTip(tooltip)
-        layout.addWidget(self.label)
-
-        # Slider
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setRange(0, 100)
-        self.slider.setValue(self._value_to_slider(default))
-        self.slider.valueChanged.connect(self._on_slider_changed)
-        layout.addWidget(self.slider, stretch=1)
-
-        # Value display
-        self.value_label = QLabel()
-        self.value_label.setFixedWidth(60)
-        self.value_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self._update_value_label(default)
-        layout.addWidget(self.value_label)
-
-    def _value_to_slider(self, val: float) -> int:
-        return int((val - self._min) / (self._max - self._min) * 100)
-
-    def _slider_to_value(self, slider_val: int) -> float:
-        return self._min + (slider_val / 100) * (self._max - self._min)
-
-    def _on_slider_changed(self, slider_val: int):
-        value = self._slider_to_value(slider_val)
-        self._update_value_label(value)
-        self.value_changed.emit(value)
-
-    def _update_value_label(self, value: float):
-        if self._decimals == 0:
-            text = f"{int(value)}{self._suffix}"
-        else:
-            text = f"{value:.{self._decimals}f}{self._suffix}"
-        self.value_label.setText(text)
-
-    def value(self) -> float:
-        return self._slider_to_value(self.slider.value())
-
-    def set_value(self, val: float):
-        self.slider.setValue(self._value_to_slider(val))
 
 
 class EffectGroup(QGroupBox):
