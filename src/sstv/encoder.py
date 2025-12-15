@@ -31,26 +31,26 @@ MODE_SPECS = {
     "PD120": {"class": PD120, "width": 640, "height": 496},
     "PD180": {"class": PD180, "width": 640, "height": 496},
     "PD290": {"class": PD290, "width": 800, "height": 616},
-    # Experimental custom modes (no pysstv class, use custom encoder)
-    "Square1K": {"class": None, "width": 1024, "height": 1024},
-    "HD720": {"class": None, "width": 1280, "height": 720},
-    "Square2K": {"class": None, "width": 2048, "height": 2048},
+    # Experimental custom mode - matches input image resolution
+    "NativeRes": {"class": None, "width": None, "height": None},
 }
 
 
-def encode_custom_mode(image: Image.Image, mode: str, sample_rate: int) -> np.ndarray:
+def encode_custom_mode(image: Image.Image, mode: str, sample_rate: int, spec: dict = None) -> np.ndarray:
     """
     Custom SSTV encoder for experimental high-resolution modes.
     Generates SSTV audio directly without using pysstv.
     """
     from .streaming_decoder import MODE_SPECS as DECODER_SPECS
 
-    if mode not in DECODER_SPECS:
-        raise ValueError(f"Unknown custom mode: {mode}")
+    if spec is None:
+        if mode not in DECODER_SPECS:
+            raise ValueError(f"Unknown custom mode: {mode}")
+        spec = DECODER_SPECS[mode]
 
-    spec = DECODER_SPECS[mode]
-    width = spec["width"]
-    height = spec["height"]
+    # Get dimensions from spec or image
+    width = spec.get("width") or image.size[0]
+    height = spec.get("height") or image.size[1]
 
     # SSTV frequency constants
     FREQ_SYNC = 1200
@@ -196,27 +196,40 @@ class SSTVEncoder:
         if mode not in MODE_SPECS:
             raise ValueError(f"Unknown SSTV mode: {mode}")
 
-        spec = MODE_SPECS[mode]
+        spec = MODE_SPECS[mode].copy()
         sstv_class = spec["class"]
-        frame_width = spec["width"]
-        frame_height = spec["height"]
 
         # Ensure RGB mode
         if image.mode != "RGB":
             image = image.convert("RGB")
 
-        if preserve_aspect:
+        # For NativeRes mode, use the actual image dimensions
+        if mode == "NativeRes":
+            frame_width, frame_height = image.size
+            spec["width"] = frame_width
+            spec["height"] = frame_height
+            # Scale scan time based on width
+            spec["scan_ms"] = 200.0 + (frame_width / 1024.0) * 100.0
+        else:
+            frame_width = spec["width"]
+            frame_height = spec["height"]
+
+        if preserve_aspect and mode != "NativeRes":
             # Fit image to frame while preserving aspect ratio
             fitted, self.last_crop_box = fit_image_to_frame(image, frame_width, frame_height)
         else:
-            # Stretch to fit (old behavior)
-            fitted = image.resize((frame_width, frame_height), Image.Resampling.LANCZOS)
-            self.last_crop_box = (0, 0, frame_width, frame_height)
+            # For NativeRes, use image as-is; for others, stretch to fit
+            if mode == "NativeRes":
+                fitted = image
+                self.last_crop_box = (0, 0, frame_width, frame_height)
+            else:
+                fitted = image.resize((frame_width, frame_height), Image.Resampling.LANCZOS)
+                self.last_crop_box = (0, 0, frame_width, frame_height)
 
         # Check if this is a custom mode or standard pysstv mode
         if sstv_class is None:
             # Use custom encoder for experimental modes
-            audio = encode_custom_mode(fitted, mode, self.sample_rate)
+            audio = encode_custom_mode(fitted, mode, self.sample_rate, spec)
         else:
             # Use pysstv for standard modes
             sstv = sstv_class(fitted, self.sample_rate, bits=16)

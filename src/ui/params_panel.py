@@ -402,13 +402,11 @@ class ParamsPanel(QWidget):
         ])
         # Add separator
         self.mode_combo.insertSeparator(self.mode_combo.count())
-        # Experimental high-resolution modes
+        # Experimental mode - matches input image resolution
         self.mode_combo.addItem("─── Experimental ───")
         self.mode_combo.model().item(self.mode_combo.count() - 1).setEnabled(False)
         self.mode_combo.addItems([
-            "Square 1K (1024×1024)",
-            "HD 720 (1280×720)",
-            "Square 2K (2048×2048)",
+            "Native Resolution",
         ])
         sstv_layout.addWidget(self.mode_combo)
         scroll_layout.addWidget(sstv_group)
@@ -754,10 +752,8 @@ class ParamsPanel(QWidget):
             "PD 120": "PD120",
             "PD 180": "PD180",
             "PD 290": "PD290",
-            # Experimental modes
-            "Square 1K (1024×1024)": "Square1K",
-            "HD 720 (1280×720)": "HD720",
-            "Square 2K (2048×2048)": "Square2K",
+            # Experimental mode
+            "Native Resolution": "NativeRes",
         }
 
         return {

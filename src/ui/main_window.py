@@ -97,7 +97,12 @@ class StreamingTransmissionWorker(QThread):
 
             # Step 3: Set up streaming decoder for affected version
             print("Creating StreamingDecoder...", flush=True)
-            decoder_affected = StreamingDecoder(sample_rate, mode)
+            # For NativeRes mode, pass image dimensions
+            if mode == "NativeRes":
+                width, height = self.source_image.size
+                decoder_affected = StreamingDecoder(sample_rate, mode, width=width, height=height)
+            else:
+                decoder_affected = StreamingDecoder(sample_rate, mode)
             total_lines = decoder_affected.height
             header_duration = decoder_affected.get_header_duration()
             line_duration = decoder_affected.get_line_duration()
@@ -192,7 +197,12 @@ class StreamingTransmissionWorker(QThread):
             if not self._stop_requested:
                 self.status_message.emit("Processing clean reference...")
                 self.progress.emit(90)
-                decoder_clean = StreamingDecoder(sample_rate, mode)
+                # For NativeRes mode, pass image dimensions
+                if mode == "NativeRes":
+                    width, height = self.source_image.size
+                    decoder_clean = StreamingDecoder(sample_rate, mode, width=width, height=height)
+                else:
+                    decoder_clean = StreamingDecoder(sample_rate, mode)
                 clean_lines = list(decoder_clean.decode_progressive(clean_audio))
                 for line_num, rgb_line in clean_lines:
                     if self._stop_requested:
@@ -627,9 +637,13 @@ to create unique visual artifacts.</p>
 
             # Get dimensions for this mode
             print("Getting mode dimensions...", flush=True)
-            from src.sstv.streaming_decoder import MODE_SPECS
-            spec = MODE_SPECS.get(mode, MODE_SPECS["MartinM1"])
-            width, height = spec["width"], spec["height"]
+            if mode == "NativeRes":
+                # For Native Resolution mode, use source image dimensions
+                width, height = source_image.size
+            else:
+                from src.sstv.streaming_decoder import MODE_SPECS
+                spec = MODE_SPECS.get(mode, MODE_SPECS["MartinM1"])
+                width, height = spec["width"], spec["height"]
             print(f"Output dimensions: {width}x{height}", flush=True)
 
             # Initialize blank output images (full frame) for both versions

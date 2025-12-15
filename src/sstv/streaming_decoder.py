@@ -91,28 +91,12 @@ MODE_SPECS = {
         "gap_ms": 2.08,
         "color_order": "RGB",
     },
-    # Experimental custom high-resolution modes (not standard SSTV)
-    "Square1K": {
-        "width": 1024,
-        "height": 1024,
+    # Experimental custom mode - matches input image resolution
+    "NativeRes": {
+        "width": None,  # Will be set dynamically based on input image
+        "height": None,
         "sync_ms": 20.0,
-        "scan_ms": 250.0,
-        "gap_ms": 2.0,
-        "color_order": "RGB",
-    },
-    "HD720": {
-        "width": 1280,
-        "height": 720,
-        "sync_ms": 20.0,
-        "scan_ms": 300.0,
-        "gap_ms": 2.0,
-        "color_order": "RGB",
-    },
-    "Square2K": {
-        "width": 2048,
-        "height": 2048,
-        "sync_ms": 20.0,
-        "scan_ms": 500.0,
+        "scan_ms": 300.0,  # Base scan time, will scale with width
         "gap_ms": 2.0,
         "color_order": "RGB",
     },
@@ -122,13 +106,23 @@ MODE_SPECS = {
 class StreamingDecoder:
     """Decodes SSTV audio progressively, yielding each line as it's decoded."""
 
-    def __init__(self, sample_rate: int, mode: str = "MartinM1"):
+    def __init__(self, sample_rate: int, mode: str = "MartinM1", width: int = None, height: int = None):
         if mode not in MODE_SPECS:
             raise ValueError(f"Unknown SSTV mode: {mode}")
 
         self.sample_rate = sample_rate
         self.mode = mode
-        self.spec = MODE_SPECS[mode]
+        self.spec = MODE_SPECS[mode].copy()  # Copy so we can modify for NativeRes
+
+        # For NativeRes mode, use provided dimensions
+        if mode == "NativeRes":
+            if width is None or height is None:
+                raise ValueError("NativeRes mode requires width and height parameters")
+            self.spec["width"] = width
+            self.spec["height"] = height
+            # Scale scan time based on width (larger images take longer per line)
+            self.spec["scan_ms"] = 200.0 + (width / 1024.0) * 100.0
+
         self.width = self.spec["width"]
         self.height = self.spec["height"]
 
