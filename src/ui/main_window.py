@@ -9,9 +9,10 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QLabel,
     QStatusBar,
+    QToolBar,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QAction, QKeySequence, QGuiApplication
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize
+from PyQt6.QtGui import QAction, QKeySequence, QGuiApplication, QIcon
 from PIL import Image
 import numpy as np
 import time
@@ -200,6 +201,9 @@ class MainWindow(QMainWindow):
         # Create menu bar
         self._create_menu_bar()
 
+        # Create toolbar
+        self._create_toolbar()
+
         # Create status bar
         self._create_status_bar()
 
@@ -281,6 +285,63 @@ class MainWindow(QMainWindow):
         about_action = QAction("&About ScanScratch", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+
+    def _create_toolbar(self):
+        """Create main toolbar with common actions."""
+        toolbar = QToolBar("Main Toolbar")
+        toolbar.setMovable(False)
+        toolbar.setIconSize(QSize(24, 24))
+        self.addToolBar(toolbar)
+
+        # Open Image
+        self.open_toolbar_action = QAction("📁 Open", self)
+        self.open_toolbar_action.setToolTip("Open Image (Ctrl+O)")
+        self.open_toolbar_action.triggered.connect(self._on_open_file)
+        toolbar.addAction(self.open_toolbar_action)
+
+        toolbar.addSeparator()
+
+        # Transmit button (starts disabled)
+        self.transmit_toolbar_action = QAction("⚡ TRANSMIT", self)
+        self.transmit_toolbar_action.setToolTip("Encode, corrupt, and decode image")
+        self.transmit_toolbar_action.setEnabled(False)
+        self.transmit_toolbar_action.triggered.connect(self._on_transmit)
+        toolbar.addAction(self.transmit_toolbar_action)
+
+        toolbar.addSeparator()
+
+        # Export
+        self.export_toolbar_action = QAction("💾 Export", self)
+        self.export_toolbar_action.setToolTip("Export Output (Ctrl+E)")
+        self.export_toolbar_action.setEnabled(False)
+        self.export_toolbar_action.triggered.connect(self._on_export)
+        toolbar.addAction(self.export_toolbar_action)
+
+        # Copy
+        self.copy_toolbar_action = QAction("📋 Copy", self)
+        self.copy_toolbar_action.setToolTip("Copy Output to Clipboard (Ctrl+C)")
+        self.copy_toolbar_action.setEnabled(False)
+        self.copy_toolbar_action.triggered.connect(self._on_copy_output)
+        toolbar.addAction(self.copy_toolbar_action)
+
+        toolbar.addSeparator()
+
+        # Reset Effects
+        reset_toolbar_action = QAction("🔄 Reset", self)
+        reset_toolbar_action.setToolTip("Reset All Effects (Ctrl+R)")
+        reset_toolbar_action.triggered.connect(self._on_reset_effects)
+        toolbar.addAction(reset_toolbar_action)
+
+        # Add stretch to push remaining items to the right
+        spacer = QWidget()
+        spacer.setSizePolicy(QWidget().sizePolicy().Expanding, QWidget().sizePolicy().Preferred)
+        toolbar.addWidget(spacer)
+
+        # Help
+        help_toolbar_action = QAction("❓ Help", self)
+        help_toolbar_action.setToolTip("Keyboard Shortcuts (Ctrl+/)")
+        help_toolbar_action.triggered.connect(self._show_shortcuts)
+        toolbar.addAction(help_toolbar_action)
 
     def _create_status_bar(self):
         """Create status bar with image info."""
@@ -403,15 +464,35 @@ class MainWindow(QMainWindow):
     def _show_about(self):
         """Show about dialog."""
         about_text = """
-<h2>ScanScratch</h2>
-<p><b>SSTV Glitch Editor</b></p>
-<p>Version 1.0</p>
+<pre style="font-family: monospace; font-size: 9px; line-height: 1.2;">
+  ╔═══════════════════════════════════════════════════════════╗
+  ║                                                           ║
+  ║   ███████╗ ██████╗ █████╗ ███╗   ██╗                     ║
+  ║   ██╔════╝██╔════╝██╔══██╗████╗  ██║                     ║
+  ║   ███████╗██║     ███████║██╔██╗ ██║                     ║
+  ║   ╚════██║██║     ██╔══██║██║╚██╗██║                     ║
+  ║   ███████║╚██████╗██║  ██║██║ ╚████║                     ║
+  ║   ╚══════╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═══╝                     ║
+  ║                                                           ║
+  ║   ███████╗ ██████╗██████╗  █████╗ ████████╗ ██████╗██╗  ║
+  ║   ██╔════╝██╔════╝██╔══██╗██╔══██╗╚══██╔══╝██╔════╝██║  ║
+  ║   ███████╗██║     ██████╔╝███████║   ██║   ██║     ██║  ║
+  ║   ╚════██║██║     ██╔══██╗██╔══██║   ██║   ██║     ██║  ║
+  ║   ███████║╚██████╗██║  ██║██║  ██║   ██║   ╚██████╗██║  ║
+  ║   ╚══════╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝    ╚═════╝╚═╝  ║
+  ║                                                           ║
+  ║          ▓▒░  SSTV Glitch Art Generator  ░▒▓            ║
+  ╚═══════════════════════════════════════════════════════════╝
+</pre>
+<p style="text-align: center;"><b>Version 1.0</b></p>
 <br>
-<p>A creative tool for generating glitch art through<br>
+<p style="text-align: center;">A creative tool for generating glitch art through<br>
 SSTV (Slow Scan Television) signal corruption.</p>
 <br>
-<p>Encode images to audio, apply effects, and decode<br>
+<p style="text-align: center;">Encode images to audio, apply effects, and decode<br>
 to create unique visual artifacts.</p>
+<br>
+<p style="text-align: center; font-size: 10px;">Built with PyQt6 • pysstv • numpy • scipy</p>
         """
         QMessageBox.about(self, "About ScanScratch", about_text)
 
@@ -427,6 +508,7 @@ to create unique visual artifacts.</p>
     def _on_source_loaded(self):
         """Handle source image loaded."""
         self.params_panel.set_transmit_enabled(True)
+        self.transmit_toolbar_action.setEnabled(True)
         self._update_status_bar()
         self.status_label.setText("Image loaded - ready to transmit")
 
@@ -535,9 +617,12 @@ to create unique visual artifacts.</p>
     def _on_transmission_finished(self):
         """Handle transmission complete."""
         self.params_panel.set_transmit_enabled(True)
+        self.transmit_toolbar_action.setEnabled(True)
         self.params_panel.stop_audio_visualization()
         self.export_action.setEnabled(True)
+        self.export_toolbar_action.setEnabled(True)
         self.copy_action.setEnabled(True)
+        self.copy_toolbar_action.setEnabled(True)
         self.output_viewer.enable_ab_toggle(True)
         # Status message already set by worker ("Transmission complete!")
         # Add A/B toggle hint
