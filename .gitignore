@@ -31,3 +31,10 @@ Thumbs.db
 *.jpeg
 test_images/
 output/
+
+# Build artifacts
+build/
+dist/
+*.spec
+*.dmg
+*.app

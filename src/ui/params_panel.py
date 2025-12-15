@@ -90,20 +90,24 @@ class Knob(QWidget):
         normalized = (self._value - self._minimum) / (self._maximum - self._minimum)
         angle = -135 + (normalized * 270)
 
-        # Draw outer ring (track)
+        # Convert math angle to Qt angle (Qt: 0° = 3 o'clock, positive = counter-clockwise)
+        # Math: 0° = 12 o'clock, angle increases clockwise
+        # The knob rotates clockwise, so we use negative spans in Qt
+        qt_current_angle = 90 - angle
+
+        # Draw background track (full 270° arc in gray)
+        # Start at 225° (lower-left), rotate 270° CLOCKWISE (negative span) to 315° (lower-right)
         painter.setPen(QPen(QColor(60, 60, 60), 3))
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawEllipse(x, y, size, size)
+        painter.drawArc(x, y, size, size, 225 * 16, -270 * 16)
 
-        # Draw value arc
-        gradient = QConicalGradient(width / 2, height / 2, -135)
-        gradient.setColorAt(0.0, QColor(90, 138, 90))
-        gradient.setColorAt(normalized, QColor(90, 138, 90))
-        gradient.setColorAt(normalized + 0.01, QColor(60, 60, 60))
-        gradient.setColorAt(1.0, QColor(60, 60, 60))
-
-        painter.setPen(QPen(QBrush(gradient), 3))
-        painter.drawArc(x, y, size, size, -45 * 16, -270 * 16)
+        # Draw value arc (from start to current position in green)
+        if normalized > 0:
+            painter.setPen(QPen(QColor(90, 138, 90), 3))
+            # Draw clockwise from 225° to current position
+            # Span is negative (clockwise) and proportional to the value
+            span = -270 * normalized
+            painter.drawArc(x, y, size, size, 225 * 16, int(span * 16))
 
         # Draw center circle
         center_size = size * 0.6
