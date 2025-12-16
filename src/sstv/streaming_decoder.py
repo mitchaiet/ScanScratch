@@ -128,17 +128,18 @@ class StreamingDecoder:
         self.width = self.spec["width"]
         self.height = self.spec["height"]
 
-        # Calculate timing in samples (keep as float for precision)
+        # Calculate timing in samples using int(round()) to match encoder exactly
+        # This prevents diagonal skew from accumulated timing drift
         ms_to_samples = sample_rate / 1000.0
 
-        self.sync_samples = self.spec["sync_ms"] * ms_to_samples
-        self.scan_samples = self.spec["scan_ms"] * ms_to_samples
-        self.gap_samples = self.spec["gap_ms"] * ms_to_samples
-        self.header_samples = HEADER_MS * ms_to_samples
+        self.sync_samples = int(round(self.spec["sync_ms"] * ms_to_samples))
+        self.scan_samples = int(round(self.spec["scan_ms"] * ms_to_samples))
+        self.gap_samples = int(round(self.spec["gap_ms"] * ms_to_samples))
+        self.header_samples = int(round(HEADER_MS * ms_to_samples))
 
-        # Line structure for Martin: sync + gap + G + gap + B + gap + R + gap
+        # Line structure: sync + gap + R + gap + G + gap + B + gap
         # Total: sync + 4*gap + 3*scan
-        # Keep as float to avoid accumulation of rounding errors
+        # Using integers that match encoder's exact sample counts
         self.line_samples = (
             self.sync_samples +
             4 * self.gap_samples +
@@ -186,10 +187,10 @@ class StreamingDecoder:
         # Process each line
         print(f"Starting line-by-line decode ({self.height} lines)...", flush=True)
         for line_num in range(self.height):
-            # Use float arithmetic and round only when indexing
-            line_start = int(round(self.header_samples + line_num * self.line_samples))
+            # All values are integers now, so simple arithmetic works
+            line_start = self.header_samples + line_num * self.line_samples
 
-            if line_start + int(round(self.line_samples)) > len(freq):
+            if line_start + self.line_samples > len(freq):
                 yield line_num, np.zeros((self.width, 3), dtype=np.uint8)
                 continue
 
@@ -252,23 +253,25 @@ class StreamingDecoder:
         """Decode a single scanline to RGB."""
         rgb = np.zeros((self.width, 3), dtype=np.uint8)
 
-        # Line structure for Martin modes:
-        # [sync][gap][GREEN][gap][BLUE][gap][RED][gap]
+        # Line structure: [sync][gap][CH1][gap][CH2][gap][CH3][gap]
+        # For RGB order: CH1=R, CH2=G, CH3=B
+        # For GBR order: CH1=G, CH2=B, CH3=R
         #
-        # Offsets from line_start:
-        # sync starts at: 0
-        # gap1 starts at: sync_samples
-        # green starts at: sync_samples + gap_samples
-        # gap2 starts at: sync_samples + gap_samples + scan_samples
-        # blue starts at: sync_samples + 2*gap_samples + scan_samples
-        # gap3 starts at: sync_samples + 2*gap_samples + 2*scan_samples
-        # red starts at: sync_samples + 3*gap_samples + 2*scan_samples
+        # Offsets from line_start (all values are integers now):
+        # ch1 starts at: sync_samples + gap_samples
+        # ch2 starts at: sync_samples + 2*gap_samples + scan_samples
+        # ch3 starts at: sync_samples + 3*gap_samples + 2*scan_samples
 
-        # Use precise float arithmetic and round only when indexing
-        green_start = int(round(line_start + self.sync_samples + self.gap_samples))
-        blue_start = int(round(green_start + self.scan_samples + self.gap_samples))
-        red_start = int(round(blue_start + self.scan_samples + self.gap_samples))
-        scan_length = int(round(self.scan_samples))
+        # All sample counts are now integers, so simple addition works
+        ch1_start = line_start + self.sync_samples + self.gap_samples
+        ch2_start = ch1_start + self.scan_samples + self.gap_samples
+        ch3_start = ch2_start + self.scan_samples + self.gap_samples
+        scan_length = self.scan_samples
+
+        # Legacy variable names for compatibility
+        green_start = ch1_start
+        blue_start = ch2_start
+        red_start = ch3_start
 
         if self.spec["color_order"] == "GBR":
             green = self._extract_channel(freq[green_start:green_start + scan_length])
