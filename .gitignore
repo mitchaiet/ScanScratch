@@ -26,15 +26,17 @@ Thumbs.db
 
 # Project specific
 *.wav
-*.png
-*.jpg
-*.jpeg
 test_images/
 output/
+outputs/
 
 # Build artifacts
 build/
 dist/
-*.spec
 *.dmg
-*.app
+
+# Keep assets but ignore generated iconset
+assets/icon.iconset/
+
+# Keep spec files (they're version controlled)
+# *.spec

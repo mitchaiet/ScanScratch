@@ -16,17 +16,29 @@ class SyncWobbleEffect:
         """
         self.amount = amount
         self.frequency = frequency
+        self._time_offset = 0.0
 
     def process(self, audio: np.ndarray, sample_rate: int) -> np.ndarray:
         """Apply sync wobble by modulating the signal."""
-        if self.amount == 0:
+        return self._apply_wobble(audio, sample_rate, self.amount, self.frequency)
+
+    def process_chunk(self, audio: np.ndarray, sample_rate: int, live_params: dict) -> np.ndarray:
+        """Process a chunk with live parameters for real-time control."""
+        amount = live_params.get(("syncwobble", "amount"), self.amount)
+        frequency = live_params.get(("syncwobble", "freq"), self.frequency)
+        return self._apply_wobble(audio, sample_rate, amount, frequency)
+
+    def _apply_wobble(self, audio: np.ndarray, sample_rate: int, amount: float, frequency: float) -> np.ndarray:
+        """Apply sync wobble with given parameters."""
+        if amount == 0:
             return audio
 
-        # Create time array
-        t = np.arange(len(audio)) / sample_rate
+        # Create time array with offset for continuity
+        t = (np.arange(len(audio)) / sample_rate) + self._time_offset
+        self._time_offset += len(audio) / sample_rate
 
         # Generate wobble modulation (LFO)
-        wobble = np.sin(2 * np.pi * self.frequency * t)
+        wobble = np.sin(2 * np.pi * frequency * t)
 
         # Add random jitter for more chaos
         jitter = np.random.uniform(-0.3, 0.3, len(audio))
@@ -35,8 +47,7 @@ class SyncWobbleEffect:
         modulation = wobble * 0.7 + jitter * 0.3
 
         # Apply as amplitude modulation with offset
-        # This creates timing shifts that corrupt SSTV sync
-        mod_signal = 1 + (modulation * self.amount * 0.15)
+        mod_signal = 1 + (modulation * amount * 0.15)
 
         result = audio * mod_signal
 
@@ -59,18 +70,28 @@ class SyncDropoutEffect:
 
     def process(self, audio: np.ndarray, sample_rate: int) -> np.ndarray:
         """Apply random sync dropouts."""
-        if self.probability == 0:
+        return self._apply_dropout(audio, sample_rate, self.probability, self.duration_ms)
+
+    def process_chunk(self, audio: np.ndarray, sample_rate: int, live_params: dict) -> np.ndarray:
+        """Process a chunk with live parameters for real-time control."""
+        probability = live_params.get(("syncdropout", "prob"), self.probability)
+        duration_ms = live_params.get(("syncdropout", "duration"), self.duration_ms)
+        return self._apply_dropout(audio, sample_rate, probability, duration_ms)
+
+    def _apply_dropout(self, audio: np.ndarray, sample_rate: int, probability: float, duration_ms: float) -> np.ndarray:
+        """Apply sync dropout with given parameters."""
+        if probability == 0:
             return audio
 
         result = audio.copy()
 
         # Calculate dropout parameters
-        dropout_samples = int(self.duration_ms * sample_rate / 1000)
+        dropout_samples = int(duration_ms * sample_rate / 1000)
         check_interval = int(sample_rate * 0.05)  # Check every 50ms
 
         # Random dropouts
         for i in range(0, len(audio), check_interval):
-            if np.random.random() < self.probability * 0.05:
+            if np.random.random() < probability * 0.05:
                 # Create a dropout
                 end = min(i + dropout_samples, len(audio))
 

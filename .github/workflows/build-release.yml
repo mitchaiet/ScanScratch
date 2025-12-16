@@ -1,0 +1,144 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Patch scipy for PyInstaller
+        run: |
+          # scipy.stats._distn_infrastructure.py has a 'del obj' that fails when packaged
+          SCIPY_FILE=$(python -c "import scipy.stats._distn_infrastructure as m; print(m.__file__)")
+          sed -i '' 's/^del obj$/# del obj  # Patched for PyInstaller/' "$SCIPY_FILE" || true
+
+      - name: Generate icon (if needed)
+        run: |
+          if [ ! -f "assets/icon.icns" ]; then
+            python generate_icon.py
+            mkdir -p assets/icon.iconset
+            cp assets/icon_16.png assets/icon.iconset/icon_16x16.png
+            cp assets/icon_32.png assets/icon.iconset/icon_16x16@2x.png
+            cp assets/icon_32.png assets/icon.iconset/icon_32x32.png
+            cp assets/icon_64.png assets/icon.iconset/icon_32x32@2x.png
+            cp assets/icon_128.png assets/icon.iconset/icon_128x128.png
+            cp assets/icon_256.png assets/icon.iconset/icon_128x128@2x.png
+            cp assets/icon_256.png assets/icon.iconset/icon_256x256.png
+            cp assets/icon_512.png assets/icon.iconset/icon_256x256@2x.png
+            cp assets/icon_512.png assets/icon.iconset/icon_512x512.png
+            cp assets/icon_1024.png assets/icon.iconset/icon_512x512@2x.png
+            iconutil -c icns assets/icon.iconset -o assets/icon.icns
+          fi
+
+      - name: Build Mac App
+        run: |
+          pyinstaller ScanScratch.spec --noconfirm
+
+      - name: Create DMG
+        run: |
+          # Create a nice DMG with Applications symlink
+          mkdir -p dist/dmg
+          cp -R dist/ScanScratch.app dist/dmg/
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname "ScanScratch" -srcfolder dist/dmg -ov -format UDZO dist/ScanScratch-macOS.dmg
+
+      - name: Upload Mac DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScanScratch-macOS
+          path: dist/ScanScratch-macOS.dmg
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Patch scipy for PyInstaller
+        run: |
+          # scipy.stats._distn_infrastructure.py has a 'del obj' that fails when packaged
+          $scipyFile = python -c "import scipy.stats._distn_infrastructure as m; print(m.__file__)"
+          (Get-Content $scipyFile) -replace '^del obj$', '# del obj  # Patched for PyInstaller' | Set-Content $scipyFile
+
+      - name: Generate icon (if needed)
+        run: |
+          if (!(Test-Path "assets/icon.ico")) {
+            python generate_icon.py
+          }
+
+      - name: Build Windows App
+        run: |
+          pyinstaller ScanScratch-windows.spec --noconfirm
+
+      - name: Create ZIP
+        run: |
+          Compress-Archive -Path dist/ScanScratch/* -DestinationPath dist/ScanScratch-Windows.zip
+
+      - name: Upload Windows ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScanScratch-Windows
+          path: dist/ScanScratch-Windows.zip
+
+  release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download Mac artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ScanScratch-macOS
+          path: ./artifacts
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ScanScratch-Windows
+          path: ./artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ./artifacts/ScanScratch-macOS.dmg
+            ./artifacts/ScanScratch-Windows.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false

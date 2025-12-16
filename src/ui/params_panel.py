@@ -583,6 +583,226 @@ class ParamsPanel(QWidget):
         """Stop audio visualization."""
         self.audio_visualizer.stop_playback()
 
+    def set_active_pipeline(self, pipeline):
+        """Connect knobs to pipeline for real-time effect control during playback."""
+        self._active_pipeline = pipeline
+
+        # Connect enable checkboxes to toggle effects on/off during playback
+        self.phasemod_group.enable_checkbox.toggled.connect(
+            lambda v: self._update_pipeline_param("phasemod", "enabled", v)
+        )
+        self.ampmod_group.enable_checkbox.toggled.connect(
+            lambda v: self._update_pipeline_param("ampmod", "enabled", v)
+        )
+        self.syncwobble_group.enable_checkbox.toggled.connect(
+            lambda v: self._update_pipeline_param("syncwobble", "enabled", v)
+        )
+        self.syncdropout_group.enable_checkbox.toggled.connect(
+            lambda v: self._update_pipeline_param("syncdropout", "enabled", v)
+        )
+        self.scanline_group.enable_checkbox.toggled.connect(
+            lambda v: self._update_pipeline_param("scanline", "enabled", v)
+        )
+        self.noise_group.enable_checkbox.toggled.connect(
+            lambda v: self._update_pipeline_param("noise", "enabled", v)
+        )
+        self.distortion_group.enable_checkbox.toggled.connect(
+            lambda v: self._update_pipeline_param("distortion", "enabled", v)
+        )
+        self.harmonic_group.enable_checkbox.toggled.connect(
+            lambda v: self._update_pipeline_param("harmonic", "enabled", v)
+        )
+        self.bitcrush_group.enable_checkbox.toggled.connect(
+            lambda v: self._update_pipeline_param("bitcrush", "enabled", v)
+        )
+        self.freqshift_group.enable_checkbox.toggled.connect(
+            lambda v: self._update_pipeline_param("freqshift", "enabled", v)
+        )
+        self.bandpass_group.enable_checkbox.toggled.connect(
+            lambda v: self._update_pipeline_param("bandpass", "enabled", v)
+        )
+        self.delay_group.enable_checkbox.toggled.connect(
+            lambda v: self._update_pipeline_param("delay", "enabled", v)
+        )
+        self.timestretch_group.enable_checkbox.toggled.connect(
+            lambda v: self._update_pipeline_param("timestretch", "enabled", v)
+        )
+
+        # Connect knob signals to pipeline.update_param()
+        # Noise
+        self.noise_amount.value_changed.connect(
+            lambda v: self._update_pipeline_param("noise", "amount", v / 100)
+        )
+
+        # Distortion
+        self.distortion_drive.value_changed.connect(
+            lambda v: self._update_pipeline_param("distortion", "drive", v / 100)
+        )
+        self.distortion_clip.value_changed.connect(
+            lambda v: self._update_pipeline_param("distortion", "clip", v / 100)
+        )
+
+        # Harmonic
+        self.harmonic_amount.value_changed.connect(
+            lambda v: self._update_pipeline_param("harmonic", "amount", v / 100)
+        )
+
+        # Phase modulation
+        self.phasemod_depth.value_changed.connect(
+            lambda v: self._update_pipeline_param("phasemod", "depth", v / 100)
+        )
+        self.phasemod_rate.value_changed.connect(
+            lambda v: self._update_pipeline_param("phasemod", "rate", v)
+        )
+
+        # Amplitude modulation
+        self.ampmod_depth.value_changed.connect(
+            lambda v: self._update_pipeline_param("ampmod", "depth", v / 100)
+        )
+        self.ampmod_rate.value_changed.connect(
+            lambda v: self._update_pipeline_param("ampmod", "rate", v)
+        )
+
+        # Sync wobble
+        self.syncwobble_amount.value_changed.connect(
+            lambda v: self._update_pipeline_param("syncwobble", "amount", v / 100)
+        )
+        self.syncwobble_freq.value_changed.connect(
+            lambda v: self._update_pipeline_param("syncwobble", "freq", v)
+        )
+
+        # Sync dropout
+        self.syncdropout_prob.value_changed.connect(
+            lambda v: self._update_pipeline_param("syncdropout", "prob", v / 100)
+        )
+        self.syncdropout_duration.value_changed.connect(
+            lambda v: self._update_pipeline_param("syncdropout", "duration", v)
+        )
+
+        # Scanline corruption
+        self.scanline_freq.value_changed.connect(
+            lambda v: self._update_pipeline_param("scanline", "freq", v / 100)
+        )
+        self.scanline_intensity.value_changed.connect(
+            lambda v: self._update_pipeline_param("scanline", "intensity", v / 100)
+        )
+
+        # Bitcrush
+        self.bitcrush_bits.value_changed.connect(
+            lambda v: self._update_pipeline_param("bitcrush", "bits", int(v))
+        )
+        self.bitcrush_rate.value_changed.connect(
+            lambda v: self._update_pipeline_param("bitcrush", "rate", int(v))
+        )
+
+        # Frequency shift
+        self.freqshift_hz.value_changed.connect(
+            lambda v: self._update_pipeline_param("freqshift", "hz", v)
+        )
+
+        # Bandpass
+        self.bandpass_low.value_changed.connect(
+            lambda v: self._update_pipeline_param("bandpass", "low", v)
+        )
+        self.bandpass_high.value_changed.connect(
+            lambda v: self._update_pipeline_param("bandpass", "high", v)
+        )
+
+        # Delay
+        self.delay_time.value_changed.connect(
+            lambda v: self._update_pipeline_param("delay", "time_ms", v)
+        )
+        self.delay_feedback.value_changed.connect(
+            lambda v: self._update_pipeline_param("delay", "feedback", v / 100)
+        )
+        self.delay_mix.value_changed.connect(
+            lambda v: self._update_pipeline_param("delay", "mix", v / 100)
+        )
+
+        # Time stretch
+        self.timestretch_rate.value_changed.connect(
+            lambda v: self._update_pipeline_param("timestretch", "rate", v)
+        )
+
+    def _update_pipeline_param(self, effect_name: str, param_name: str, value: float):
+        """Send parameter update to active pipeline."""
+        if hasattr(self, '_active_pipeline') and self._active_pipeline is not None:
+            print(f">>> LIVE PARAM UPDATE: {effect_name}.{param_name} = {value}", flush=True)
+            self._active_pipeline.update_param(effect_name, param_name, value)
+        else:
+            print(f">>> PARAM UPDATE IGNORED (no active pipeline): {effect_name}.{param_name} = {value}", flush=True)
+
+    def clear_active_pipeline(self):
+        """Disconnect knobs from pipeline when playback ends."""
+        # Disconnect enable checkbox signals to prevent accumulation
+        try:
+            self.phasemod_group.enable_checkbox.toggled.disconnect()
+            self.ampmod_group.enable_checkbox.toggled.disconnect()
+            self.syncwobble_group.enable_checkbox.toggled.disconnect()
+            self.syncdropout_group.enable_checkbox.toggled.disconnect()
+            self.scanline_group.enable_checkbox.toggled.disconnect()
+            self.noise_group.enable_checkbox.toggled.disconnect()
+            self.distortion_group.enable_checkbox.toggled.disconnect()
+            self.harmonic_group.enable_checkbox.toggled.disconnect()
+            self.bitcrush_group.enable_checkbox.toggled.disconnect()
+            self.freqshift_group.enable_checkbox.toggled.disconnect()
+            self.bandpass_group.enable_checkbox.toggled.disconnect()
+            self.delay_group.enable_checkbox.toggled.disconnect()
+            self.timestretch_group.enable_checkbox.toggled.disconnect()
+        except TypeError:
+            pass  # No connections to disconnect
+
+        # Disconnect knob signals
+        try:
+            self.noise_amount.value_changed.disconnect()
+            self.distortion_drive.value_changed.disconnect()
+            self.distortion_clip.value_changed.disconnect()
+            self.harmonic_amount.value_changed.disconnect()
+            self.phasemod_depth.value_changed.disconnect()
+            self.phasemod_rate.value_changed.disconnect()
+            self.ampmod_depth.value_changed.disconnect()
+            self.ampmod_rate.value_changed.disconnect()
+            self.syncwobble_amount.value_changed.disconnect()
+            self.syncwobble_freq.value_changed.disconnect()
+            self.syncdropout_prob.value_changed.disconnect()
+            self.syncdropout_duration.value_changed.disconnect()
+            self.scanline_freq.value_changed.disconnect()
+            self.scanline_intensity.value_changed.disconnect()
+            self.bitcrush_bits.value_changed.disconnect()
+            self.bitcrush_rate.value_changed.disconnect()
+            self.freqshift_hz.value_changed.disconnect()
+            self.bandpass_low.value_changed.disconnect()
+            self.bandpass_high.value_changed.disconnect()
+            self.delay_time.value_changed.disconnect()
+            self.delay_feedback.value_changed.disconnect()
+            self.delay_mix.value_changed.disconnect()
+            self.timestretch_rate.value_changed.disconnect()
+        except TypeError:
+            pass  # No connections to disconnect
+
+        # Reconnect internal effect group enable callbacks
+        self._reconnect_effect_group_callbacks()
+
+        self._active_pipeline = None
+
+    def _reconnect_effect_group_callbacks(self):
+        """Reconnect the internal enable/disable callbacks for effect groups."""
+        # These are the internal callbacks that dim content when disabled
+        # They were disconnected when we called disconnect() above
+        self.phasemod_group.enable_checkbox.toggled.connect(self.phasemod_group._on_enabled_changed)
+        self.ampmod_group.enable_checkbox.toggled.connect(self.ampmod_group._on_enabled_changed)
+        self.syncwobble_group.enable_checkbox.toggled.connect(self.syncwobble_group._on_enabled_changed)
+        self.syncdropout_group.enable_checkbox.toggled.connect(self.syncdropout_group._on_enabled_changed)
+        self.scanline_group.enable_checkbox.toggled.connect(self.scanline_group._on_enabled_changed)
+        self.noise_group.enable_checkbox.toggled.connect(self.noise_group._on_enabled_changed)
+        self.distortion_group.enable_checkbox.toggled.connect(self.distortion_group._on_enabled_changed)
+        self.harmonic_group.enable_checkbox.toggled.connect(self.harmonic_group._on_enabled_changed)
+        self.bitcrush_group.enable_checkbox.toggled.connect(self.bitcrush_group._on_enabled_changed)
+        self.freqshift_group.enable_checkbox.toggled.connect(self.freqshift_group._on_enabled_changed)
+        self.bandpass_group.enable_checkbox.toggled.connect(self.bandpass_group._on_enabled_changed)
+        self.delay_group.enable_checkbox.toggled.connect(self.delay_group._on_enabled_changed)
+        self.timestretch_group.enable_checkbox.toggled.connect(self.timestretch_group._on_enabled_changed)
+
     def _apply_preset(self, preset_name: str):
         """Apply a preset configuration."""
         if preset_name not in self.PRESETS:

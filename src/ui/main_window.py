@@ -22,6 +22,133 @@ import os
 from .image_viewer import ImageViewer
 from .params_panel import ParamsPanel
 from .export_dialog import ExportDialog
+from .gallery_panel import GalleryPanel
+from .output_popup import OutputPopup
+from ..output_manager import OutputManager
+
+
+class RealTimeAudioPlayer:
+    """Real-time audio player with callback-based streaming and live effects."""
+
+    def __init__(self, clean_audio: np.ndarray, pipeline, sample_rate: int):
+        """
+        Initialize real-time audio player.
+
+        Args:
+            clean_audio: The clean (unprocessed) audio data
+            pipeline: EffectsPipeline instance for live processing
+            sample_rate: Audio sample rate
+        """
+        import sounddevice as sd
+        import threading
+
+        self.clean_audio = clean_audio
+        self.pipeline = pipeline
+        self.sample_rate = sample_rate
+        self.position = 0
+        self._stream = None
+        self._stop_requested = False
+
+        # Buffer size affects latency: smaller = more responsive, larger = more stable
+        self.blocksize = 1024  # ~23ms at 44100Hz
+
+        # Buffer to accumulate processed audio for decoding
+        self.processed_buffer = np.zeros(len(clean_audio), dtype=np.float32)
+        self.processed_position = 0
+        self._buffer_lock = threading.Lock()
+
+    def _audio_callback(self, outdata, frames, time_info, status):
+        """Audio callback - processes chunks in real-time."""
+        import sounddevice as sd
+
+        if status:
+            print(f"Audio callback status: {status}", flush=True)
+
+        # Get chunk from clean audio
+        end_pos = min(self.position + frames, len(self.clean_audio))
+        chunk = self.clean_audio[self.position:end_pos].copy()
+
+        # Pad if needed (end of audio)
+        if len(chunk) < frames:
+            chunk = np.pad(chunk, (0, frames - len(chunk)), mode='constant')
+
+        # Apply effects in real-time with current knob values
+        if self.pipeline is not None:
+            try:
+                processed = self.pipeline.process_chunk(chunk)
+            except Exception as e:
+                print(f"Effect processing error: {e}", flush=True)
+                processed = chunk
+        else:
+            processed = chunk
+
+        # Store processed audio in buffer for decoding
+        with self._buffer_lock:
+            write_end = min(self.processed_position + len(processed), len(self.processed_buffer))
+            write_len = write_end - self.processed_position
+            if write_len > 0:
+                self.processed_buffer[self.processed_position:write_end] = processed[:write_len]
+                self.processed_position = write_end
+
+        # Output as mono (reshape to (frames, 1))
+        outdata[:] = processed.reshape(-1, 1)
+
+        # Advance position
+        self.position += frames
+
+        # Signal end of playback
+        if self.position >= len(self.clean_audio):
+            raise sd.CallbackStop()
+
+    def start(self):
+        """Start audio playback."""
+        import sounddevice as sd
+        self.position = 0
+        self.processed_position = 0
+        self._stop_requested = False
+        self._stream = sd.OutputStream(
+            samplerate=self.sample_rate,
+            channels=1,
+            dtype='float32',
+            blocksize=self.blocksize,
+            callback=self._audio_callback
+        )
+        self._stream.start()
+
+    def stop(self):
+        """Stop audio playback."""
+        self._stop_requested = True
+        if self._stream is not None:
+            self._stream.stop()
+            self._stream.close()
+            self._stream = None
+
+    def is_active(self) -> bool:
+        """Check if playback is still active."""
+        return self._stream is not None and self._stream.active
+
+    def get_position(self) -> int:
+        """Get current sample position."""
+        return self.position
+
+    def get_processed_position(self) -> int:
+        """Get position of processed audio in buffer."""
+        with self._buffer_lock:
+            return self.processed_position
+
+    def get_processed_audio(self, start: int, end: int) -> np.ndarray:
+        """Get a slice of the processed audio buffer."""
+        with self._buffer_lock:
+            end = min(end, self.processed_position)
+            if start >= end:
+                return np.array([], dtype=np.float32)
+            return self.processed_buffer[start:end].copy()
+
+    def get_progress(self) -> float:
+        """Get playback progress (0.0 to 1.0)."""
+        if len(self.clean_audio) == 0:
+            return 1.0
+        return self.position / len(self.clean_audio)
 
 
 class StreamingTransmissionWorker(QThread):
@@ -33,6 +160,7 @@ class StreamingTransmissionWorker(QThread):
     clean_line_decoded = pyqtSignal(int, object)  # line_number, numpy rgb array (clean)
     encoding_done = pyqtSignal(object)  # crop_box tuple
     audio_ready = pyqtSignal(object, int)  # audio_data, sample_rate
+    pipeline_ready = pyqtSignal(object)  # pipeline for live control
     finished = pyqtSignal()
     error = pyqtSignal(str)
 
@@ -49,6 +177,7 @@ class StreamingTransmissionWorker(QThread):
     def run(self):
         """Run streaming transmission with live audio and progressive A/B decode."""
         print("=== WORKER THREAD STARTED ===", flush=True)
+        audio_player = None
         try:
             import sounddevice as sd
             print("✓ sounddevice imported", flush=True)
@@ -79,23 +208,19 @@ class StreamingTransmissionWorker(QThread):
             self.encoding_done.emit(crop_box)
             self.progress.emit(10)
 
-            # Step 2: Apply audio effects to create affected version
-            print("Applying effects...", flush=True)
-            self.status_message.emit("Applying audio effects...")
+            # Step 2: Configure effects pipeline (but don't apply yet - real-time processing)
+            print("Configuring effects pipeline...", flush=True)
+            self.status_message.emit("Configuring audio effects...")
             self.progress.emit(12)
             pipeline = EffectsPipeline(sample_rate)
             pipeline.configure(self.settings)
-            affected_audio = pipeline.process(clean_audio)
-            print(f"✓ Effects applied", flush=True)
+
+            # Emit pipeline reference so UI can connect knobs
+            self.pipeline_ready.emit(pipeline)
+            print(f"✓ Pipeline configured and emitted", flush=True)
             self.progress.emit(15)
 
-            # Send affected audio to visualizer and playback
-            print("Sending audio to visualizer...", flush=True)
-            self.status_message.emit("Starting transmission playback...")
-            self.audio_ready.emit(affected_audio, sample_rate)
-            print("✓ Audio sent to visualizer", flush=True)
-
-            # Step 3: Set up streaming decoder for affected version
+            # Step 3: Set up streaming decoder
             print("Creating StreamingDecoder...", flush=True)
             # For NativeRes mode, pass image dimensions
             if mode == "NativeRes":
@@ -104,96 +229,151 @@ class StreamingTransmissionWorker(QThread):
             else:
                 decoder_affected = StreamingDecoder(sample_rate, mode)
             total_lines = decoder_affected.height
-            header_duration = decoder_affected.get_header_duration()
-            line_duration = decoder_affected.get_line_duration()
-            print(f"✓ Decoder ready: {total_lines} lines, {header_duration:.2f}s header, {line_duration:.3f}s/line", flush=True)
+            header_samples = decoder_affected.header_samples
+            line_samples = decoder_affected.line_samples
+            print(f"✓ Decoder ready: {total_lines} lines", flush=True)
 
-            # Step 4: Start audio playback (only affected audio is played)
-            print("Starting audio playback...", flush=True)
-            self.status_message.emit(f"Transmitting {total_lines} scanlines...")
+            # Step 4: Create real-time audio player with pipeline
+            print("Creating real-time audio player...", flush=True)
+            self.status_message.emit(f"Transmitting {total_lines} scanlines (real-time effects)...")
+
+            audio_player = RealTimeAudioPlayer(clean_audio, pipeline, sample_rate)
+
+            # Send clean audio to visualizer (it will show the waveform)
+            self.audio_ready.emit(clean_audio, sample_rate)
+
             try:
-                print(f"  Calling sd.play with {len(affected_audio)} samples at {sample_rate}Hz...", flush=True)
-                sd.play(affected_audio, sample_rate)
-                print("✓ sd.play() returned successfully", flush=True)
+                audio_player.start()
+                print("✓ Real-time audio player started", flush=True)
             except Exception as e:
-                print(f"!!! ERROR in sd.play: {e}", flush=True)
+                print(f"!!! ERROR starting audio player: {e}", flush=True)
                 import traceback
                 traceback.print_exc()
                 raise
 
-            # Step 5: Decode affected version live, sync with audio playback
-            print("Starting progressive decode...", flush=True)
-            import time
-            start_time = time.time()
+            # Step 5: Decode lines in real-time from processed audio buffer
+            print("Starting real-time decode from processed audio...", flush=True)
 
-            line_count = 0
-            print(f"About to enter decode_progressive loop...", flush=True)
+            # Create a line decoder that works with the streaming decoder's parameters
+            from src.sstv.streaming_decoder import FREQ_BLACK, FREQ_WHITE
+            from scipy import signal as sig
 
-            try:
-                for line_num, rgb_line in decoder_affected.decode_progressive(affected_audio):
-                    if line_count == 0:
-                        print(f"✓ First line decoded! line_num={line_num}, rgb_line.shape={rgb_line.shape}", flush=True)
-                    line_count += 1
+            # Pre-compute filter for FM demodulation
+            nyq = sample_rate / 2
+            low = 1000 / nyq
+            high = 2500 / nyq
+            filter_b, filter_a = sig.butter(4, [low, high], btype='band')
 
-                    if line_count % 10 == 0:
-                        print(f"  Line {line_count}/{decoder_affected.height} decoded...", flush=True)
+            def decode_line_from_audio(audio_segment, width):
+                """Decode a single line from processed audio segment."""
+                if len(audio_segment) < 100:
+                    return np.zeros((width, 3), dtype=np.uint8)
 
-                    if self._stop_requested:
-                        print("Stop requested, breaking...", flush=True)
-                        sd.stop()
-                        break
+                # FM demodulate this segment
+                try:
+                    filtered = sig.lfilter(filter_b, filter_a, audio_segment)
+                    analytic = sig.hilbert(filtered)
+                    phase = np.unwrap(np.angle(analytic))
+                    freq = np.diff(phase) * sample_rate / (2 * np.pi)
+                    freq = np.append(freq, freq[-1])
+                except Exception:
+                    return np.zeros((width, 3), dtype=np.uint8)
 
-                    # Calculate when this line should appear based on audio timing
-                    target_time = header_duration + (line_num + 1) * line_duration
-                    elapsed = time.time() - start_time
+                # Extract RGB channels from line
+                # Line structure: [sync][gap][CH1][gap][CH2][gap][CH3][gap]
+                sync_samples = decoder_affected.sync_samples
+                gap_samples = decoder_affected.gap_samples
+                scan_samples = decoder_affected.scan_samples
 
-                    # Wait for audio to catch up
-                    if elapsed < target_time:
-                        sleep_time = target_time - elapsed
-                        while sleep_time > 0 and not self._stop_requested:
-                            time.sleep(min(0.05, sleep_time))
-                            sleep_time -= 0.05
+                ch1_start = sync_samples + gap_samples
+                ch2_start = ch1_start + scan_samples + gap_samples
+                ch3_start = ch2_start + scan_samples + gap_samples
 
-                    try:
-                        # Emit the decoded line
+                rgb = np.zeros((width, 3), dtype=np.uint8)
+
+                def extract_channel(start, length):
+                    end = start + length
+                    if end > len(freq):
+                        return np.zeros(width, dtype=np.uint8)
+                    segment = freq[start:end]
+                    indices = np.linspace(0, len(segment) - 1, width).astype(int)
+                    resampled = segment[indices]
+                    intensity = (resampled - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)
+                    return np.clip(intensity * 255, 0, 255).astype(np.uint8)
+
+                # For RGB order (PD modes and NativeRes)
+                if decoder_affected.spec.get("color_order") == "RGB":
+                    rgb[:, 0] = extract_channel(ch1_start, scan_samples)
+                    rgb[:, 1] = extract_channel(ch2_start, scan_samples)
+                    rgb[:, 2] = extract_channel(ch3_start, scan_samples)
+                else:  # GBR order (Martin, Scottie)
+                    rgb[:, 1] = extract_channel(ch1_start, scan_samples)  # G
+                    rgb[:, 2] = extract_channel(ch2_start, scan_samples)  # B
+                    rgb[:, 0] = extract_channel(ch3_start, scan_samples)  # R
+
+                return rgb
+
+            # Step 6: Sync line display with audio playback, decode from live buffer
+            print("Syncing display with live processed audio...", flush=True)
+            last_decoded_line = -1
+            width = decoder_affected.width
+
+            while audio_player.is_active() and not self._stop_requested:
+                # Get current processed position
+                processed_pos = audio_player.get_processed_position()
+
+                # Calculate which line we can decode based on processed audio
+                if processed_pos < header_samples:
+                    decodable_line = -1
+                else:
+                    # We can decode a line when we have all samples for it
+                    decodable_line = (processed_pos - header_samples) // line_samples - 1
+
+                # Decode any new lines that have enough audio
+                while last_decoded_line < decodable_line and last_decoded_line < total_lines - 1:
+                    last_decoded_line += 1
+                    line_num = last_decoded_line
+
+                    # Get audio segment for this line
+                    line_start = header_samples + line_num * line_samples
+                    line_end = line_start + line_samples
+                    line_audio = audio_player.get_processed_audio(line_start, line_end)
+
+                    if len(line_audio) >= line_samples:
+                        rgb_line = decode_line_from_audio(line_audio, width)
                         self.line_decoded.emit(line_num, rgb_line)
-                    except Exception as e:
-                        print(f"!!! ERROR emitting line_decoded signal: {e}", flush=True)
-                        raise
 
-                    try:
-                        # Update progress and status (15% to 85% during affected decode)
+                        # Update progress (15% to 85% during decode)
                         progress = 15 + int((line_num / total_lines) * 70)
                         self.progress.emit(progress)
-                    except Exception as e:
-                        print(f"!!! ERROR emitting progress: {e}", flush=True)
-                        raise
 
-                    # Update status every 32 lines
-                    if line_num % 32 == 0:
-                        try:
+                        # Update status every 32 lines
+                        if line_num % 32 == 0:
                             percent_complete = int((line_num / total_lines) * 100)
-                            self.status_message.emit(f"Decoding: {percent_complete}% ({line_num}/{total_lines} lines)")
-                        except Exception as e:
-                            print(f"!!! ERROR emitting status message: {e}", flush=True)
-                            raise
+                            self.status_message.emit(f"Live decode: {percent_complete}% ({line_num}/{total_lines} lines)")
 
-                print(f"✓ Affected decode loop complete: {line_count} lines", flush=True)
-            except Exception as e:
-                print(f"\n!!! EXCEPTION IN DECODE LOOP: {e}", flush=True)
-                import traceback
-                traceback.print_exc()
-                raise
+                # Small sleep to avoid busy-waiting
+                time.sleep(0.01)
 
-            # Wait for audio to finish
-            if not self._stop_requested:
-                remaining = decoder_affected.get_total_duration() - (time.time() - start_time)
-                if remaining > 0:
-                    time.sleep(remaining)
+            # Decode any remaining lines after playback ends
+            while last_decoded_line < total_lines - 1:
+                last_decoded_line += 1
+                line_num = last_decoded_line
+                line_start = header_samples + line_num * line_samples
+                line_end = line_start + line_samples
+                line_audio = audio_player.get_processed_audio(line_start, line_end)
 
-            sd.stop()
+                if len(line_audio) >= line_samples:
+                    rgb_line = decode_line_from_audio(line_audio, width)
+                    self.line_decoded.emit(line_num, rgb_line)
 
-            # Step 6: Quickly decode clean version (no audio, just fast image processing)
+            print(f"✓ Live decode complete", flush=True)
+
+            # Stop audio player
+            if audio_player is not None:
+                audio_player.stop()
+
+            # Step 7: Quickly decode clean version (no audio, just fast image processing)
             if not self._stop_requested:
                 self.status_message.emit("Processing clean reference...")
                 self.progress.emit(90)
@@ -221,6 +401,8 @@ class StreamingTransmissionWorker(QThread):
             import traceback
             traceback.print_exc()
             print("=== END ERROR ===\n", flush=True)
+            if audio_player is not None:
+                audio_player.stop()
             self.error.emit(str(e))
             self.finished.emit()
 
@@ -239,6 +421,9 @@ class MainWindow(QMainWindow):
         self._clean_image_data = None  # Clean version (no effects)
         self._crop_box = None  # For removing letterbox/pillarbox
         self._showing_clean = False  # A/B toggle state
+        self._current_mode = None  # Current SSTV mode for auto-save
+        self._current_settings = None  # Current effect settings for auto-save
+        self._output_manager = OutputManager()  # Manages saving outputs
 
         # Create central widget with vertical layout
         central = QWidget()
@@ -282,6 +467,11 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(splitter)
         main_layout.addLayout(content_layout)
 
+        # Create gallery panel
+        self.gallery_panel = GalleryPanel(self._output_manager)
+        self.gallery_panel.output_selected.connect(self._on_gallery_output_selected)
+        main_layout.addWidget(self.gallery_panel)
+
         # Create status bar
         self._create_status_bar()
 
@@ -303,12 +493,6 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        # Export
-        self.export_action = QAction("&Export Output...", self)
-        self.export_action.setShortcut(QKeySequence("Ctrl+E"))
-        self.export_action.setEnabled(False)
-        self.export_action.triggered.connect(self._on_export)
-        file_menu.addAction(self.export_action)
 
         # Copy to Clipboard
         self.copy_action = QAction("&Copy Output to Clipboard", self)
@@ -395,13 +579,6 @@ class MainWindow(QMainWindow):
         self.open_btn.clicked.connect(self._on_open_file)
         header_layout.addWidget(self.open_btn)
 
-        self.export_btn = QPushButton("Export")
-        self.export_btn.setObjectName("headerButton")
-        self.export_btn.setToolTip("Export Output (Ctrl+E)")
-        self.export_btn.setEnabled(False)
-        self.export_btn.clicked.connect(self._on_export)
-        header_layout.addWidget(self.export_btn)
-
         self.copy_btn = QPushButton("Copy")
         self.copy_btn.setObjectName("headerButton")
         self.copy_btn.setToolTip("Copy to Clipboard (Ctrl+C)")
@@ -430,7 +607,6 @@ class MainWindow(QMainWindow):
         """Connect widget signals."""
         self.source_viewer.image_loaded.connect(self._on_source_loaded)
         self.params_panel.transmit_requested.connect(self._on_transmit)
-        self.output_viewer.export_requested.connect(self._on_export_version)
 
     def _on_open_file(self):
         """Open file dialog to load an image."""
@@ -635,6 +811,10 @@ to create unique visual artifacts.</p>
             mode = effect_settings.get("sstv_mode", "MartinM1")
             print(f"Mode: {mode}", flush=True)
 
+            # Store for auto-save
+            self._current_mode = mode
+            self._current_settings = effect_settings
+
             # Get dimensions for this mode
             print("Getting mode dimensions...", flush=True)
             if mode == "NativeRes":
@@ -660,7 +840,6 @@ to create unique visual artifacts.</p>
             self.params_panel.set_transmit_enabled(False)
             self.params_panel.set_progress(0)
             self.status_label.setText("Transmitting...")
-            self.export_action.setEnabled(False)
             self.copy_action.setEnabled(False)
             print("✓ UI controls disabled", flush=True)
         except Exception as e:
@@ -678,6 +857,7 @@ to create unique visual artifacts.</p>
             self._worker.status_message.connect(self._on_status_message)
             self._worker.encoding_done.connect(self._on_encoding_done)
             self._worker.audio_ready.connect(self._on_audio_ready)
+            self._worker.pipeline_ready.connect(self._on_pipeline_ready)
             self._worker.line_decoded.connect(self._on_line_decoded)
             self._worker.clean_line_decoded.connect(self._on_clean_line_decoded)
             self._worker.finished.connect(self._on_transmission_finished)
@@ -712,6 +892,18 @@ to create unique visual artifacts.</p>
             print(f"✓ Audio data sent to params panel", flush=True)
         except Exception as e:
             print(f"!!! ERROR in _on_audio_ready: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            raise
+
+    def _on_pipeline_ready(self, pipeline):
+        """Connect pipeline to params panel for live effect control."""
+        try:
+            print(f">>> _on_pipeline_ready CALLED: pipeline={pipeline}", flush=True)
+            self.params_panel.set_active_pipeline(pipeline)
+            print(f"✓ Pipeline connected to params panel", flush=True)
+        except Exception as e:
+            print(f"!!! ERROR in _on_pipeline_ready: {e}", flush=True)
             import traceback
             traceback.print_exc()
             raise
@@ -810,16 +1002,127 @@ to create unique visual artifacts.</p>
         """Handle transmission complete."""
         self.params_panel.set_transmit_enabled(True)
         self.params_panel.stop_audio_visualization()
-        self.export_action.setEnabled(True)
-        self.export_btn.setEnabled(True)
+        self.params_panel.clear_active_pipeline()  # Disconnect knobs from pipeline
         self.copy_action.setEnabled(True)
         self.copy_btn.setEnabled(True)
         self.output_viewer.enable_ab_toggle(True)
-        # Status message already set by worker ("Transmission complete!")
-        # Add A/B toggle hint
-        QTimer.singleShot(500, lambda: self.status_label.setText("Transmission complete - toggle A/B to compare versions"))
+
+        # Start auto-save in background
+        self._start_auto_save()
+
+        # Status will be updated by auto-save
         QTimer.singleShot(1000, lambda: self.params_panel.set_progress(0))
-        QTimer.singleShot(8000, lambda: self.status_label.setText("Ready"))
+
+    def _start_auto_save(self):
+        """Start auto-saving outputs in background."""
+        if self._output_image_data is None or self._current_mode is None:
+            return
+
+        self.status_label.setText("Saving outputs...")
+
+        # Create auto-save worker
+        class AutoSaveWorker(QThread):
+            finished = pyqtSignal(str)  # folder path
+            progress = pyqtSignal(str)  # status message
+            error = pyqtSignal(str)
+
+            def __init__(self, output_manager, mode, settings, affected_data, clean_data, crop_box, source_image):
+                super().__init__()
+                self.output_manager = output_manager
+                self.mode = mode
+                self.settings = settings
+                self.affected_data = affected_data.copy() if affected_data is not None else None
+                self.clean_data = clean_data.copy() if clean_data is not None else None
+                self.crop_box = crop_box
+                self.source_image = source_image
+
+            def run(self):
+                try:
+                    # Create output folder
+                    folder = self.output_manager.create_output_folder(self.mode)
+                    self.progress.emit("Saving images...")
+
+                    # Skip upscaling for NativeRes mode (already full resolution)
+                    is_native_res = self.mode == "NativeRes"
+
+                    # Save effects version
+                    if self.affected_data is not None:
+                        self.output_manager.save_image(folder, "effects", self.affected_data, self.crop_box, skip_upscale=is_native_res)
+
+                    # Save clean version
+                    if self.clean_data is not None:
+                        self.output_manager.save_image(folder, "clean", self.clean_data, self.crop_box, skip_upscale=is_native_res)
+
+                    # Save thumbnail (use effects version)
+                    if self.affected_data is not None:
+                        self.output_manager.save_thumbnail(folder, self.affected_data)
+
+                    # Save metadata
+                    self.output_manager.save_metadata(folder, self.settings, mode=self.mode)
+
+                    # Generate video using the actual decoded image
+                    self.progress.emit("Generating video...")
+                    try:
+                        from src.export.video_export import create_decode_video_from_image
+                        video_path = str(folder / "video.mp4")
+                        print(f"[AutoSave] Starting video export to: {video_path}", flush=True)
+                        print(f"[AutoSave] Affected image shape: {self.affected_data.shape}", flush=True)
+                        print(f"[AutoSave] Mode: {self.mode}", flush=True)
+                        success = create_decode_video_from_image(
+                            self.affected_data,  # Use the actual decoded image
+                            self.source_image,
+                            self.mode,
+                            self.settings,
+                            video_path,
+                            fps=30,
+                        )
+                        print(f"[AutoSave] Video export returned: {success}", flush=True)
+                        if success:
+                            print(f"[AutoSave] Video saved successfully to {video_path}", flush=True)
+                        else:
+                            print(f"[AutoSave] Video export failed", flush=True)
+                    except Exception as e:
+                        print(f"[AutoSave] Video export error (non-fatal): {e}", flush=True)
+                        import traceback
+                        traceback.print_exc()
+
+                    self.finished.emit(str(folder))
+                except Exception as e:
+                    self.error.emit(str(e))
+
+        self._auto_save_worker = AutoSaveWorker(
+            self._output_manager,
+            self._current_mode,
+            self._current_settings,
+            self._output_image_data,
+            self._clean_image_data,
+            self._crop_box,
+            self.source_viewer.get_image(),
+        )
+
+        def on_progress(status):
+            self.status_label.setText(status)
+
+        def on_finished(folder_path):
+            from pathlib import Path
+            self.gallery_panel.add_output(Path(folder_path))
+            self.status_label.setText(f"Saved to {os.path.basename(folder_path)}")
+            QTimer.singleShot(5000, lambda: self.status_label.setText("Ready"))
+
+        def on_error(error_msg):
+            self.status_label.setText(f"Save error: {error_msg}")
+            QTimer.singleShot(5000, lambda: self.status_label.setText("Ready"))
+
+        self._auto_save_worker.progress.connect(on_progress)
+        self._auto_save_worker.finished.connect(on_finished)
+        self._auto_save_worker.error.connect(on_error)
+        self._auto_save_worker.start()
+
+    def _on_gallery_output_selected(self, folder):
+        """Handle gallery thumbnail click."""
+        popup = OutputPopup(folder, self._output_manager, self)
+        popup.deleted.connect(lambda: self.gallery_panel.refresh())
+        popup.exec()
 
     def _on_transmission_error(self, error_msg: str):
         """Handle transmission error."""

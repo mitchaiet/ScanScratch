@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QSizePolicy,
-    QPushButton,
+    QCheckBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage, QDragEnterEvent, QDropEvent
@@ -20,7 +20,6 @@ class ImageViewer(QWidget):
 
     image_loaded = pyqtSignal()
     ab_toggled = pyqtSignal(bool)  # True = showing clean, False = showing affected
-    export_requested = pyqtSignal(str)  # "affected" or "clean"
 
     def __init__(self, title: str = "IMAGE", accept_drops: bool = False, show_ab_toggle: bool = False):
         super().__init__()
@@ -52,29 +51,14 @@ class ImageViewer(QWidget):
         if self._show_ab_toggle:
             title_row.addStretch()
 
-            # Export buttons
-            self.export_affected_btn = QPushButton("Export A")
-            self.export_affected_btn.setObjectName("exportButton")
-            self.export_affected_btn.setEnabled(False)
-            self.export_affected_btn.clicked.connect(lambda: self.export_requested.emit("affected"))
-            self.export_affected_btn.setToolTip("Export version with effects")
-            title_row.addWidget(self.export_affected_btn)
-
-            self.export_clean_btn = QPushButton("Export B")
-            self.export_clean_btn.setObjectName("exportButton")
-            self.export_clean_btn.setEnabled(False)
-            self.export_clean_btn.clicked.connect(lambda: self.export_requested.emit("clean"))
-            self.export_clean_btn.setToolTip("Export clean version")
-            title_row.addWidget(self.export_clean_btn)
-
-            # A/B toggle button
-            self.ab_button = QPushButton("A (WITH EFFECTS)")
-            self.ab_button.setObjectName("abToggle")
-            self.ab_button.setFixedWidth(150)
-            self.ab_button.setEnabled(False)
-            self.ab_button.clicked.connect(self._on_ab_clicked)
-            self.ab_button.setToolTip("Toggle between clean and affected transmission")
-            title_row.addWidget(self.ab_button)
+            # Effects preview toggle
+            self.effects_toggle = QCheckBox("Effects")
+            self.effects_toggle.setObjectName("effectsToggle")
+            self.effects_toggle.setChecked(True)  # Start with effects ON
+            self.effects_toggle.setEnabled(False)
+            self.effects_toggle.toggled.connect(self._on_effects_toggled)
+            self.effects_toggle.setToolTip("Toggle between effects and clean preview")
+            title_row.addWidget(self.effects_toggle)
 
         layout.addLayout(title_row)
 
@@ -174,21 +158,17 @@ class ImageViewer(QWidget):
 
         self.image_label.setPixmap(scaled_pixmap)
 
-    def _on_ab_clicked(self):
-        """Handle A/B toggle button click."""
-        self._is_clean = not self._is_clean
-        if self._is_clean:
-            self.ab_button.setText("B (CLEAN)")
-        else:
-            self.ab_button.setText("A (WITH EFFECTS)")
+    def _on_effects_toggled(self, effects_on: bool):
+        """Handle effects toggle checkbox change."""
+        # When effects checkbox is ON, we're NOT showing clean (effects visible)
+        # When effects checkbox is OFF, we ARE showing clean
+        self._is_clean = not effects_on
         self.ab_toggled.emit(self._is_clean)
 
     def enable_ab_toggle(self, enabled: bool):
-        """Enable or disable the A/B toggle button and export buttons."""
+        """Enable or disable the effects toggle."""
         if self._show_ab_toggle:
-            self.ab_button.setEnabled(enabled)
-            self.export_affected_btn.setEnabled(enabled)
-            self.export_clean_btn.setEnabled(enabled)
+            self.effects_toggle.setEnabled(enabled)
 
     def fit_to_window(self):
         """Trigger image to fit to current window size."""

@@ -23,6 +23,12 @@ class NoiseEffect:
         noise = self._generate_noise(len(audio), sample_rate)
         return audio + noise * self.amount
 
+    def process_chunk(self, audio: np.ndarray, sample_rate: int, live_params: dict) -> np.ndarray:
+        """Process a chunk with live parameters for real-time control."""
+        amount = live_params.get(("noise", "amount"), self.amount)
+        noise = self._generate_noise(len(audio), sample_rate)
+        return audio + noise * amount
+
     def _generate_noise(self, length: int, sample_rate: int) -> np.ndarray:
         """Generate noise of the specified type."""
         if self.noise_type == "white":
