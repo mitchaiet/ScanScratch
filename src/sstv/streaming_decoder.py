@@ -120,8 +120,10 @@ class StreamingDecoder:
                 raise ValueError("NativeRes mode requires width and height parameters")
             self.spec["width"] = width
             self.spec["height"] = height
-            # Scale scan time based on width (larger images take longer per line)
-            self.spec["scan_ms"] = 200.0 + (width / 1024.0) * 100.0
+            # Use MartinM1 pixel rate as reference (146.432ms / 320px = 0.4576ms/px)
+            # This ensures consistent pixel timing across all resolutions
+            REFERENCE_MS_PER_PIXEL = 146.432 / 320.0
+            self.spec["scan_ms"] = width * REFERENCE_MS_PER_PIXEL
 
         self.width = self.spec["width"]
         self.height = self.spec["height"]

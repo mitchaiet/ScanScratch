@@ -36,10 +36,43 @@ MODE_SPECS = {
 }
 
 
+def generate_continuous_audio(freq_time_pairs, sample_rate):
+    """
+    Generate phase-continuous audio from (frequency, duration_ms) tuples.
+
+    This maintains phase continuity across all frequency segments, preventing
+    clicks and pops that would otherwise occur at segment boundaries.
+
+    Args:
+        freq_time_pairs: List of (frequency_hz, duration_ms) tuples
+        sample_rate: Audio sample rate in Hz
+
+    Returns:
+        numpy array of audio samples with continuous phase
+    """
+    audio_chunks = []
+    phase_offset = 0.0
+
+    for freq, duration_ms in freq_time_pairs:
+        num_samples = int(duration_ms * sample_rate / 1000.0)
+        if num_samples == 0:
+            continue
+
+        t = np.arange(num_samples) / sample_rate
+        audio = np.sin(2 * np.pi * freq * t + phase_offset)
+        audio_chunks.append(audio)
+
+        # Accumulate phase for continuity into next segment
+        phase_offset = (phase_offset + 2 * np.pi * freq * num_samples / sample_rate) % (2 * np.pi)
+
+    return np.concatenate(audio_chunks) if audio_chunks else np.array([])
+
+
 def encode_custom_mode(image: Image.Image, mode: str, sample_rate: int, spec: dict) -> np.ndarray:
     """
     Custom SSTV encoder for experimental high-resolution modes.
-    Generates SSTV audio directly without using pysstv.
+    Generates SSTV audio directly without using pysstv, using phase-continuous
+    sine wave generation to avoid artifacts.
 
     Args:
         image: PIL Image to encode
@@ -56,65 +89,44 @@ def encode_custom_mode(image: Image.Image, mode: str, sample_rate: int, spec: di
     FREQ_BLACK = 1500
     FREQ_WHITE = 2300
 
-    # Convert timings to samples
-    ms_to_samples = sample_rate / 1000.0
-    sync_samples = int(spec["sync_ms"] * ms_to_samples)
-    scan_samples = int(spec["scan_ms"] * ms_to_samples)
-    gap_samples = int(spec["gap_ms"] * ms_to_samples)
+    # Calculate precise per-pixel timing (float precision, not integer division)
+    ms_per_pixel = spec["scan_ms"] / width
 
-    # Generate header (VIS code) - simplified version
-    header_samples = int(910 * ms_to_samples)  # 910ms header
-    header = np.ones(header_samples) * FREQ_SYNC
+    # Build list of (frequency, duration_ms) pairs for entire transmission
+    freq_time_pairs = []
 
-    audio_chunks = [header]
+    # 1. Header (simplified VIS code)
+    freq_time_pairs.append((FREQ_SYNC, 910.0))
 
-    # Get pixel data
+    # 2. Get pixel data
     pixels = np.array(image)
 
-    # Encode each scanline
+    # 3. Encode each scanline
     for y in range(height):
         line_pixels = pixels[y]
 
         # Sync pulse
-        t = np.linspace(0, spec["sync_ms"]/1000, sync_samples, endpoint=False)
-        sync = np.sin(2 * np.pi * FREQ_SYNC * t)
-        audio_chunks.append(sync)
+        freq_time_pairs.append((FREQ_SYNC, spec["sync_ms"]))
 
-        # Gap
-        t_gap = np.linspace(0, spec["gap_ms"]/1000, gap_samples, endpoint=False)
-        gap = np.sin(2 * np.pi * FREQ_SYNC * t_gap)
-        audio_chunks.append(gap)
+        # Gap after sync (use BLACK, not SYNC)
+        freq_time_pairs.append((FREQ_BLACK, spec["gap_ms"]))
 
         # Encode R, G, B channels
-        for channel_idx in [0, 1, 2]:  # RGB order
+        for channel_idx in [0, 1, 2]:
             channel_data = line_pixels[:, channel_idx]
 
-            # Map pixel values (0-255) to frequencies (1500-2300 Hz)
-            freqs = FREQ_BLACK + (channel_data / 255.0) * (FREQ_WHITE - FREQ_BLACK)
-
-            # Generate audio for this channel
-            t_scan = np.linspace(0, spec["scan_ms"]/1000, scan_samples, endpoint=False)
-            channel_audio = np.zeros(scan_samples)
-
-            # Divide scanline into chunks and generate frequency for each
-            samples_per_pixel = scan_samples // width
+            # Generate one frequency-time pair per pixel
             for x in range(width):
-                start_idx = x * samples_per_pixel
-                end_idx = start_idx + samples_per_pixel
-                if end_idx > scan_samples:
-                    end_idx = scan_samples
+                pixel_value = channel_data[x]
+                # Map pixel value (0-255) to frequency (1500-2300 Hz)
+                freq = FREQ_BLACK + (pixel_value / 255.0) * (FREQ_WHITE - FREQ_BLACK)
+                freq_time_pairs.append((freq, ms_per_pixel))
 
-                freq = freqs[x]
-                t_chunk = t_scan[start_idx:end_idx]
-                channel_audio[start_idx:end_idx] = np.sin(2 * np.pi * freq * t_chunk)
+            # Gap after channel (use BLACK, not SYNC)
+            freq_time_pairs.append((FREQ_BLACK, spec["gap_ms"]))
 
-            audio_chunks.append(channel_audio)
-
-            # Gap after channel
-            audio_chunks.append(gap.copy())
-
-    # Concatenate all audio
-    audio = np.concatenate(audio_chunks)
+    # 4. Generate phase-continuous audio from frequency-time pairs
+    audio = generate_continuous_audio(freq_time_pairs, sample_rate)
 
     # Normalize to float32 [-1, 1]
     audio = audio.astype(np.float32)
@@ -213,8 +225,10 @@ class SSTVEncoder:
             frame_width, frame_height = image.size
             spec["width"] = frame_width
             spec["height"] = frame_height
-            # Scale scan time based on width
-            spec["scan_ms"] = 200.0 + (frame_width / 1024.0) * 100.0
+            # Use MartinM1 pixel rate as reference (146.432ms / 320px = 0.4576ms/px)
+            # This ensures consistent pixel timing across all resolutions
+            REFERENCE_MS_PER_PIXEL = 146.432 / 320.0
+            spec["scan_ms"] = frame_width * REFERENCE_MS_PER_PIXEL
         else:
             frame_width = spec["width"]
             frame_height = spec["height"]
