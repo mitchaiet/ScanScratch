@@ -89,44 +89,79 @@ def encode_custom_mode(image: Image.Image, mode: str, sample_rate: int, spec: di
     FREQ_BLACK = 1500
     FREQ_WHITE = 2300
 
-    # Calculate precise per-pixel timing (float precision, not integer division)
-    ms_per_pixel = spec["scan_ms"] / width
+    # Calculate sample counts for precise timing
+    ms_to_samples = sample_rate / 1000.0
+    sync_samples = int(round(spec["sync_ms"] * ms_to_samples))
+    scan_samples = int(round(spec["scan_ms"] * ms_to_samples))
+    gap_samples = int(round(spec["gap_ms"] * ms_to_samples))
+    header_samples = int(round(910.0 * ms_to_samples))
 
-    # Build list of (frequency, duration_ms) pairs for entire transmission
-    freq_time_pairs = []
-
-    # 1. Header (simplified VIS code)
-    freq_time_pairs.append((FREQ_SYNC, 910.0))
-
-    # 2. Get pixel data
+    # Get pixel data
     pixels = np.array(image)
 
-    # 3. Encode each scanline
+    # Build audio with continuous phase
+    audio_chunks = []
+    phase = 0.0
+
+    def add_tone(freq, num_samples):
+        """Add a tone segment maintaining phase continuity."""
+        nonlocal phase
+        if num_samples <= 0:
+            return
+        t = np.arange(num_samples) / sample_rate
+        chunk = np.sin(2 * np.pi * freq * t + phase)
+        audio_chunks.append(chunk)
+        phase = (phase + 2 * np.pi * freq * num_samples / sample_rate) % (2 * np.pi)
+
+    def add_channel(channel_data):
+        """Encode a color channel with interpolated frequencies."""
+        nonlocal phase
+        if scan_samples <= 0:
+            return
+
+        # Map pixel values to frequencies
+        pixel_freqs = FREQ_BLACK + (channel_data.astype(np.float64) / 255.0) * (FREQ_WHITE - FREQ_BLACK)
+
+        # Interpolate frequencies across scan_samples
+        pixel_positions = np.linspace(0, width - 1, scan_samples)
+        interpolated_freqs = np.interp(pixel_positions, np.arange(width), pixel_freqs)
+
+        # Generate audio sample-by-sample with continuous phase
+        t = np.arange(scan_samples) / sample_rate
+        # Use instantaneous frequency: each sample uses its interpolated frequency
+        # Phase accumulates: phase[n] = phase[n-1] + 2*pi*freq[n-1]/sample_rate
+        phase_increments = 2 * np.pi * interpolated_freqs / sample_rate
+        phases = phase + np.cumsum(phase_increments)
+        phases = np.insert(phases[:-1], 0, phase)  # Shift so first sample uses initial phase
+
+        chunk = np.sin(phases)
+        audio_chunks.append(chunk)
+        phase = phases[-1] + phase_increments[-1]
+        phase = phase % (2 * np.pi)
+
+    # 1. Header (simplified VIS code)
+    add_tone(FREQ_SYNC, header_samples)
+
+    # 2. Encode each scanline
     for y in range(height):
         line_pixels = pixels[y]
 
         # Sync pulse
-        freq_time_pairs.append((FREQ_SYNC, spec["sync_ms"]))
+        add_tone(FREQ_SYNC, sync_samples)
 
-        # Gap after sync (use BLACK, not SYNC)
-        freq_time_pairs.append((FREQ_BLACK, spec["gap_ms"]))
+        # Gap after sync
+        add_tone(FREQ_BLACK, gap_samples)
 
         # Encode R, G, B channels
         for channel_idx in [0, 1, 2]:
             channel_data = line_pixels[:, channel_idx]
+            add_channel(channel_data)
 
-            # Generate one frequency-time pair per pixel
-            for x in range(width):
-                pixel_value = channel_data[x]
-                # Map pixel value (0-255) to frequency (1500-2300 Hz)
-                freq = FREQ_BLACK + (pixel_value / 255.0) * (FREQ_WHITE - FREQ_BLACK)
-                freq_time_pairs.append((freq, ms_per_pixel))
+            # Gap after channel
+            add_tone(FREQ_BLACK, gap_samples)
 
-            # Gap after channel (use BLACK, not SYNC)
-            freq_time_pairs.append((FREQ_BLACK, spec["gap_ms"]))
-
-    # 4. Generate phase-continuous audio from frequency-time pairs
-    audio = generate_continuous_audio(freq_time_pairs, sample_rate)
+    # Concatenate all audio
+    audio = np.concatenate(audio_chunks)
 
     # Normalize to float32 [-1, 1]
     audio = audio.astype(np.float32)
