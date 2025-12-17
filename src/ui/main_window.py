@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize
-from PyQt6.QtGui import QAction, QKeySequence, QGuiApplication, QIcon
+from PyQt6.QtGui import QAction, QKeySequence, QGuiApplication, QIcon, QImage
 from PIL import Image
 import numpy as np
 import time
@@ -123,9 +123,25 @@ class RealTimeAudioPlayer:
             self._stream.close()
             self._stream = None
 
+    def pause(self):
+        """Pause audio playback."""
+        if self._stream is not None and self._stream.active:
+            self._stream.stop()
+            self._paused = True
+
+    def resume(self):
+        """Resume audio playback."""
+        if self._stream is not None and hasattr(self, '_paused') and self._paused:
+            self._stream.start()
+            self._paused = False
+
+    def is_paused(self) -> bool:
+        """Check if playback is paused."""
+        return hasattr(self, '_paused') and self._paused
+
     def is_active(self) -> bool:
         """Check if playback is still active."""
-        return self._stream is not None and self._stream.active
+        return self._stream is not None and (self._stream.active or self.is_paused())
 
     def get_position(self) -> int:
         """Get current sample position."""
@@ -161,6 +177,7 @@ class StreamingTransmissionWorker(QThread):
     encoding_done = pyqtSignal(object)  # crop_box tuple
     audio_ready = pyqtSignal(object, int)  # audio_data, sample_rate
     pipeline_ready = pyqtSignal(object)  # pipeline for live control
+    audio_player_ready = pyqtSignal(object)  # audio player for pause/resume control
     finished = pyqtSignal()
     error = pyqtSignal(str)
 
@@ -238,6 +255,9 @@ class StreamingTransmissionWorker(QThread):
             self.status_message.emit(f"Transmitting {total_lines} scanlines (real-time effects)...")
 
             audio_player = RealTimeAudioPlayer(clean_audio, pipeline, sample_rate)
+
+            # Send audio player reference for pause/resume control
+            self.audio_player_ready.emit(audio_player)
 
             # Send clean audio to visualizer (it will show the waveform)
             self.audio_ready.emit(clean_audio, sample_rate)
@@ -417,6 +437,7 @@ class MainWindow(QMainWindow):
         self.resize(1400, 800)
 
         self._worker = None
+        self._audio_player = None  # For pause/resume control
         self._output_image_data = None  # Affected version
         self._clean_image_data = None  # Clean version (no effects)
         self._crop_box = None  # For removing letterbox/pillarbox
@@ -555,36 +576,58 @@ class MainWindow(QMainWindow):
 
         self.header_widget = QFrame()
         self.header_widget.setObjectName("unifiedHeader")
-        self.header_widget.setMaximumHeight(24)
+        self.header_widget.setMaximumHeight(32)
         header_layout = QHBoxLayout(self.header_widget)
-        header_layout.setContentsMargins(8, 1, 8, 1)
-        header_layout.setSpacing(6)
+        header_layout.setContentsMargins(12, 4, 12, 4)
+        header_layout.setSpacing(8)
 
-        # Logo section - minimal
+        # Logo section
         logo_label = QLabel("SCANSCRATCH")
         logo_font = QFont()
-        logo_font.setPixelSize(9)
+        logo_font.setPixelSize(11)
         logo_font.setBold(True)
         logo_label.setFont(logo_font)
         logo_label.setObjectName("headerLogo")
         header_layout.addWidget(logo_label)
 
-        # Spacer
-        header_layout.addStretch()
+        # Separator
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.Shape.VLine)
+        sep1.setStyleSheet("color: #444;")
+        header_layout.addWidget(sep1)
 
-        # Action buttons - compact, no emoji
+        # File operations
         self.open_btn = QPushButton("Open")
         self.open_btn.setObjectName("headerButton")
         self.open_btn.setToolTip("Open Image (Ctrl+O)")
         self.open_btn.clicked.connect(self._on_open_file)
         header_layout.addWidget(self.open_btn)
 
+        paste_btn = QPushButton("Paste")
+        paste_btn.setObjectName("headerButton")
+        paste_btn.setToolTip("Paste Image from Clipboard (Ctrl+V)")
+        paste_btn.clicked.connect(self._on_paste_image)
+        header_layout.addWidget(paste_btn)
+
         self.copy_btn = QPushButton("Copy")
         self.copy_btn.setObjectName("headerButton")
-        self.copy_btn.setToolTip("Copy to Clipboard (Ctrl+C)")
+        self.copy_btn.setToolTip("Copy Output to Clipboard (Ctrl+C)")
         self.copy_btn.setEnabled(False)
         self.copy_btn.clicked.connect(self._on_copy_output)
         header_layout.addWidget(self.copy_btn)
+
+        # Separator
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.VLine)
+        sep2.setStyleSheet("color: #444;")
+        header_layout.addWidget(sep2)
+
+        # Effects operations
+        randomize_btn = QPushButton("Randomize")
+        randomize_btn.setObjectName("headerButton")
+        randomize_btn.setToolTip("Randomize Effect Parameters")
+        randomize_btn.clicked.connect(self._on_randomize_effects)
+        header_layout.addWidget(randomize_btn)
 
         reset_btn = QPushButton("Reset")
         reset_btn.setObjectName("headerButton")
@@ -592,16 +635,92 @@ class MainWindow(QMainWindow):
         reset_btn.clicked.connect(self._on_reset_effects)
         header_layout.addWidget(reset_btn)
 
+        # Separator
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.Shape.VLine)
+        sep3.setStyleSheet("color: #444;")
+        header_layout.addWidget(sep3)
+
+        # Playback controls
+        self.pause_btn = QPushButton("Pause")
+        self.pause_btn.setObjectName("headerButton")
+        self.pause_btn.setToolTip("Pause/Resume Transmission Playback")
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.clicked.connect(self._on_toggle_pause)
+        header_layout.addWidget(self.pause_btn)
+
+        self.stop_btn = QPushButton("Stop")
+        self.stop_btn.setObjectName("headerButton")
+        self.stop_btn.setToolTip("Stop Transmission")
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self._on_stop_transmission)
+        header_layout.addWidget(self.stop_btn)
+
+        # Spacer
+        header_layout.addStretch()
+
+        # Outputs folder button
+        outputs_btn = QPushButton("Outputs")
+        outputs_btn.setObjectName("headerButton")
+        outputs_btn.setToolTip("Open Outputs Folder")
+        outputs_btn.clicked.connect(self._on_open_outputs_folder)
+        header_layout.addWidget(outputs_btn)
+
     def _create_status_bar(self):
-        """Create status bar with image info."""
+        """Create status bar with progress and info."""
+        from PyQt6.QtWidgets import QProgressBar
+
         self.status_bar = QStatusBar()
+        self.status_bar.setStyleSheet("""
+            QStatusBar {
+                background-color: #1a1a1a;
+                border-top: 1px solid #333;
+                padding: 2px 8px;
+            }
+            QStatusBar QLabel {
+                color: #888;
+                padding: 0 8px;
+            }
+            QStatusBar QProgressBar {
+                border: 1px solid #333;
+                border-radius: 3px;
+                background-color: #252525;
+                text-align: center;
+                color: #888;
+                max-height: 12px;
+                min-width: 150px;
+            }
+            QStatusBar QProgressBar::chunk {
+                background-color: #4a7c4a;
+                border-radius: 2px;
+            }
+        """)
         self.setStatusBar(self.status_bar)
 
+        # Status text
         self.status_label = QLabel("Ready")
-        self.status_bar.addWidget(self.status_label)
+        self.status_label.setMinimumWidth(200)
+        self.status_bar.addWidget(self.status_label, 1)
 
+        # Progress bar (hidden by default)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(False)
+        self.status_bar.addWidget(self.progress_bar)
+
+        # Mode indicator
+        self.mode_label = QLabel("")
+        self.status_bar.addPermanentWidget(self.mode_label)
+
+        # Image info
         self.image_info_label = QLabel("")
         self.status_bar.addPermanentWidget(self.image_info_label)
+
+        # Output count
+        self.output_count_label = QLabel("")
+        self.status_bar.addPermanentWidget(self.output_count_label)
+        self._update_output_count()
 
     def _connect_signals(self):
         """Connect widget signals."""
@@ -720,6 +839,61 @@ class MainWindow(QMainWindow):
         """Reset all effects to clean preset."""
         self.params_panel.preset_combo.setCurrentText("Clean")
 
+    def _on_paste_image(self):
+        """Paste image from clipboard."""
+        clipboard = QGuiApplication.clipboard()
+        mime_data = clipboard.mimeData()
+
+        if mime_data.hasImage():
+            qimg = clipboard.image()
+            if not qimg.isNull():
+                # Convert QImage to PIL Image
+                qimg = qimg.convertToFormat(QImage.Format.Format_RGB888)
+                width = qimg.width()
+                height = qimg.height()
+                ptr = qimg.bits()
+                ptr.setsize(height * width * 3)
+                arr = np.array(ptr).reshape(height, width, 3)
+                pil_image = Image.fromarray(arr)
+
+                # Load into source viewer
+                self.source_viewer.set_image(pil_image)
+                self.status_label.setText("Image pasted from clipboard")
+                return
+
+        self.status_label.setText("No image in clipboard")
+        QTimer.singleShot(2000, lambda: self.status_label.setText("Ready"))
+
+    def _on_randomize_effects(self):
+        """Randomize effect parameters."""
+        import random
+        self.params_panel.preset_combo.setCurrentText("Random")
+        self.status_label.setText("Effects randomized")
+        QTimer.singleShot(2000, lambda: self.status_label.setText("Ready"))
+
+    def _on_open_outputs_folder(self):
+        """Open the outputs folder in file explorer."""
+        import subprocess
+        import platform
+        outputs_path = os.path.abspath("outputs")
+        os.makedirs(outputs_path, exist_ok=True)
+
+        if platform.system() == "Darwin":  # macOS
+            subprocess.run(["open", outputs_path])
+        elif platform.system() == "Windows":
+            subprocess.run(["explorer", outputs_path])
+        else:  # Linux
+            subprocess.run(["xdg-open", outputs_path])
+
+    def _update_output_count(self):
+        """Update the output count in status bar."""
+        try:
+            outputs = self._output_manager.get_all_outputs()
+            count = len(outputs)
+            self.output_count_label.setText(f"{count} outputs")
+        except Exception:
+            self.output_count_label.setText("")
+
     def _show_shortcuts(self):
         """Show keyboard shortcuts dialog."""
         shortcuts_text = """
@@ -761,7 +935,7 @@ class MainWindow(QMainWindow):
   ║          ▓▒░  SSTV Glitch Art Generator  ░▒▓            ║
   ╚═══════════════════════════════════════════════════════════╝
 </pre>
-<p style="text-align: center;"><b>Version 1.0</b></p>
+<p style="text-align: center;"><b>Version 1.1.0</b></p>
 <br>
 <p style="text-align: center;">A creative tool for generating glitch art through<br>
 SSTV (Slow Scan Television) signal corruption.</p>
@@ -840,6 +1014,9 @@ to create unique visual artifacts.</p>
             self.params_panel.set_transmit_enabled(False)
             self.params_panel.set_progress(0)
             self.status_label.setText("Transmitting...")
+            self.progress_bar.setValue(0)
+            self.progress_bar.setVisible(True)
+            self.mode_label.setText(f"Mode: {mode}")
             self.copy_action.setEnabled(False)
             print("✓ UI controls disabled", flush=True)
         except Exception as e:
@@ -858,6 +1035,7 @@ to create unique visual artifacts.</p>
             self._worker.encoding_done.connect(self._on_encoding_done)
             self._worker.audio_ready.connect(self._on_audio_ready)
             self._worker.pipeline_ready.connect(self._on_pipeline_ready)
+            self._worker.audio_player_ready.connect(self._on_audio_player_ready)
             self._worker.line_decoded.connect(self._on_line_decoded)
             self._worker.clean_line_decoded.connect(self._on_clean_line_decoded)
             self._worker.finished.connect(self._on_transmission_finished)
@@ -875,6 +1053,7 @@ to create unique visual artifacts.</p>
     def _on_progress(self, value: int):
         """Handle progress update."""
         self.params_panel.set_progress(value)
+        self.progress_bar.setValue(value)
 
     def _on_status_message(self, message: str):
         """Handle detailed status message updates."""
@@ -907,6 +1086,38 @@ to create unique visual artifacts.</p>
             import traceback
             traceback.print_exc()
             raise
+
+    def _on_audio_player_ready(self, audio_player):
+        """Store audio player reference for pause/resume control."""
+        self._audio_player = audio_player
+        self.pause_btn.setEnabled(True)
+        self.stop_btn.setEnabled(True)
+        self.pause_btn.setText("Pause")
+
+    def _on_toggle_pause(self):
+        """Toggle pause/resume of transmission playback."""
+        if self._audio_player is None:
+            return
+
+        if self._audio_player.is_paused():
+            self._audio_player.resume()
+            self.pause_btn.setText("Pause")
+            self.status_label.setText("Resumed playback")
+        else:
+            self._audio_player.pause()
+            self.pause_btn.setText("Resume")
+            self.status_label.setText("Paused - press Resume to continue")
+
+    def _on_stop_transmission(self):
+        """Stop the current transmission."""
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.stop()
+            if self._audio_player is not None:
+                self._audio_player.stop()
+            self.status_label.setText("Transmission stopped")
+            # Disable buttons
+            self.pause_btn.setEnabled(False)
+            self.stop_btn.setEnabled(False)
 
     def _on_line_decoded(self, line_num: int, rgb_line: np.ndarray):
         """Handle a decoded line from affected stream - update the output image."""
@@ -1006,6 +1217,11 @@ to create unique visual artifacts.</p>
         self.copy_action.setEnabled(True)
         self.copy_btn.setEnabled(True)
         self.output_viewer.enable_ab_toggle(True)
+        self.progress_bar.setVisible(False)
+        self.pause_btn.setEnabled(False)
+        self.stop_btn.setEnabled(False)
+        self.pause_btn.setText("Pause")
+        self._audio_player = None
 
         # Start auto-save in background
         self._start_auto_save()
@@ -1106,6 +1322,7 @@ to create unique visual artifacts.</p>
         def on_finished(folder_path):
             from pathlib import Path
             self.gallery_panel.add_output(Path(folder_path))
+            self._update_output_count()
             self.status_label.setText(f"Saved to {os.path.basename(folder_path)}")
             QTimer.singleShot(5000, lambda: self.status_label.setText("Ready"))
 
@@ -1130,6 +1347,11 @@ to create unique visual artifacts.</p>
         import traceback
         traceback.print_exc()
         self.params_panel.set_transmit_enabled(True)
+        self.progress_bar.setVisible(False)
+        self.pause_btn.setEnabled(False)
+        self.stop_btn.setEnabled(False)
+        self.pause_btn.setText("Pause")
+        self._audio_player = None
         self.status_label.setText(f"Error: {error_msg}")
 
     def closeEvent(self, event):

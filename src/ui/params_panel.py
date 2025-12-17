@@ -34,7 +34,7 @@ class Knob(QWidget):
         self._is_dragging = False
         self._last_y = 0
 
-        self.setFixedSize(50, 50)
+        self.setFixedSize(40, 40)
         self.setMouseTracking(True)
 
     def value(self) -> int:
@@ -159,8 +159,8 @@ class EffectKnob(QWidget):
         self._suffix = suffix
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
-        layout.setSpacing(4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
 
         # Label above knob
         self.label = QLabel(label)
@@ -220,8 +220,8 @@ class EffectGroup(QGroupBox):
         self.setTitle("")
 
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(12, 8, 12, 12)
-        self._layout.setSpacing(6)
+        self._layout.setContentsMargins(8, 4, 8, 6)
+        self._layout.setSpacing(2)
 
         # Header with enable checkbox
         header = QHBoxLayout()
@@ -235,8 +235,8 @@ class EffectGroup(QGroupBox):
         # Content widget - horizontal layout for knobs
         self.content = QWidget()
         self.content_layout = QHBoxLayout(self.content)
-        self.content_layout.setContentsMargins(0, 4, 0, 0)
-        self.content_layout.setSpacing(8)
+        self.content_layout.setContentsMargins(0, 2, 0, 0)
+        self.content_layout.setSpacing(4)
         self._layout.addWidget(self.content)
 
         self._on_enabled_changed(enabled)
@@ -357,8 +357,8 @@ class ParamsPanel(QWidget):
     def _setup_ui(self):
         """Set up the UI."""
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(8, 8, 8, 8)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(4, 4, 4, 4)
+        main_layout.setSpacing(4)
 
         # Title
         title = QLabel("PARAMETERS")
@@ -372,8 +372,8 @@ class ParamsPanel(QWidget):
 
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setContentsMargins(4, 4, 4, 4)
-        scroll_layout.setSpacing(12)
+        scroll_layout.setContentsMargins(2, 2, 2, 2)
+        scroll_layout.setSpacing(4)
 
         # Presets
         preset_group = QGroupBox("Glitch Presets")
